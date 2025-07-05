@@ -9,7 +9,7 @@ import { useToast } from "@/hooks/use-toast"
 
 interface BingoCardProps {
   calledNumbers: number[]
-  currentNumber?: number
+  currentNumber?: number | null
 }
 
 export default function BingoCard({ calledNumbers, currentNumber }: BingoCardProps) {
@@ -209,7 +209,7 @@ export default function BingoCard({ calledNumbers, currentNumber }: BingoCardPro
               const number = bingoNumbers[col][row]
               const isMarked = markedCells[col][row]
               const isFreeSpace = col === 2 && row === 2
-              const isCurrentNumber = number === currentNumber
+              const isCurrentNumber = currentNumber !== null && currentNumber !== undefined && number === currentNumber
 
               return (
                 <Button
