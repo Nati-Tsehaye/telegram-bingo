@@ -5,16 +5,7 @@ import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 import BingoGame from "./bingo-game"
 import { getBoardById, type BingoBoard } from "@/data/bingo-boards"
-
-interface GameRoom {
-  id: number
-  stake: number
-  players: number
-  prize: number
-  status: "waiting" | "active"
-  activeGames?: number
-  hasBonus: boolean
-}
+import type { GameRoom } from "@/lib/socket-server"
 
 interface GameScreenProps {
   room: GameRoom
@@ -25,7 +16,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   const [selectedBoardNumber, setSelectedBoardNumber] = useState<number | null>(null) // Green number from image
   const [selectedBoard, setSelectedBoard] = useState<BingoBoard | null>(null)
   const [gameStatus, setGameStatus] = useState<"waiting" | "active" | "starting">("waiting")
-  const [activeGames, setActiveGames] = useState(0)
+  const [activeGames, setActiveGames] = useState(room.activeGames || 0)
   const [showBingoGame, setShowBingoGame] = useState(false)
 
   // Generate numbers 1-100 in a 10x10 grid

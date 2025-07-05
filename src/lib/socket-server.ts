@@ -18,6 +18,8 @@ export interface GameRoom {
   prize: number
   createdAt: Date
   gameStartTime?: Date
+  activeGames?: number
+  hasBonus: boolean
 }
 
 class GameRoomManager {
@@ -41,6 +43,8 @@ class GameRoomManager {
         status: "waiting",
         prize: 0,
         createdAt: new Date(),
+        activeGames: 0,
+        hasBonus: true,
       }
       this.rooms.set(roomId, room)
     })
@@ -71,6 +75,8 @@ class GameRoomManager {
       status: "waiting",
       prize: 0,
       createdAt: new Date(),
+      activeGames: 0,
+      hasBonus: true,
     }
     this.rooms.set(roomId, room)
     return room
@@ -100,6 +106,7 @@ class GameRoomManager {
         if (room.status === "starting") {
           room.status = "active"
           room.gameStartTime = new Date()
+          room.activeGames = 1
         }
       }, 10000)
     }
@@ -121,6 +128,7 @@ class GameRoomManager {
     // Reset room status if no players
     if (room.players.length === 0) {
       room.status = "waiting"
+      room.activeGames = 0
     }
 
     return true

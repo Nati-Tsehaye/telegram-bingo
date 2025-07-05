@@ -5,16 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Volume2, VolumeX } from "lucide-react"
 import type { BingoBoard } from "@/data/bingo-boards"
-
-interface GameRoom {
-  id: number
-  stake: number
-  players: number
-  prize: number
-  status: "waiting" | "active"
-  activeGames?: number
-  hasBonus: boolean
-}
+import type { GameRoom } from "@/lib/socket-server"
 
 interface BingoGameProps {
   room: GameRoom
@@ -67,7 +58,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         <div className="flex justify-between items-center text-white text-xs font-medium px-2">
           <div className="text-center">
             <div>Game ID</div>
-            <div className="font-bold">5c481</div>
+            <div className="font-bold">{room.id.slice(-5)}</div>
           </div>
           <div className="text-center">
             <div>Derash</div>
@@ -75,7 +66,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           </div>
           <div className="text-center">
             <div>Players</div>
-            <div className="font-bold">{room.players}</div>
+            <div className="font-bold">{room.players.length}</div>
           </div>
           <div className="text-center">
             <div>Bet</div>
@@ -169,8 +160,8 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           </div>
 
           {/* Player Bingo Card - Using Selected Board */}
-          <div className="bg-amber-100 rounded-lg p-2">
-            <div className="grid grid-cols-5 gap-1 mb-2">
+          <div className="bg-amber-100 rounded-lg p-3">
+            <div className="grid grid-cols-5 gap-1">
               {selectedBoard.numbers.map((row, rowIndex) =>
                 row.map((number, colIndex) => {
                   const isMarked = markedCells[rowIndex][colIndex]
