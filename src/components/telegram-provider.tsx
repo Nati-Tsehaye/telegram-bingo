@@ -153,18 +153,6 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
           }
         }
 
-        // PREVENT AUTO-REFRESH: Clear any existing intervals/timeouts
-        // This ensures no background refresh happens in Telegram
-        const highestTimeoutId = setTimeout(() => {}, 0)
-        for (let i = 0; i < highestTimeoutId; i++) {
-          clearTimeout(i)
-        }
-
-        const highestIntervalId = setInterval(() => {}, 0)
-        for (let i = 0; i < highestIntervalId; i++) {
-          clearInterval(i)
-        }
-
         setWebApp(tg)
         setUser(tg.initDataUnsafe?.user || null)
         setIsReady(true)
