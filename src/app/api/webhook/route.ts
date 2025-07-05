@@ -20,10 +20,20 @@ interface TelegramUpdate {
   }
 }
 
+interface ReplyMarkup {
+  inline_keyboard?: Array<
+    Array<{
+      text: string
+      web_app?: { url: string }
+      switch_inline_query?: string
+    }>
+  >
+}
+
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://your-app-url.vercel.app"
 
-async function sendMessage(chatId: number, text: string, replyMarkup?: any) {
+async function sendMessage(chatId: number, text: string, replyMarkup?: ReplyMarkup) {
   if (!TELEGRAM_BOT_TOKEN) {
     console.error("TELEGRAM_BOT_TOKEN is not set")
     return
@@ -92,24 +102,28 @@ export async function POST(request: NextRequest) {
       case "/help":
         await sendMessage(
           chatId,
-          `🆘 <b>Arada Bingo Help</b>\n\n` +
-            `<b>Commands:</b>\n` +
-            `/start - Start the game\n` +
-            `/play - Quick play\n` +
-            `/rooms - Show available rooms\n` +
-            `/balance - Check your balance\n` +
-            `/help - Show this help\n\n` +
-            `<b>How to Play:</b>\n` +
+          `📚 <b>How To Play Arada Bingo</b>\n\n` +
+            `<b>🎯 Game Rules:</b>\n` +
             `1️⃣ Choose a room with your preferred stake\n` +
-            `2️⃣ Select your bingo board\n` +
+            `2️⃣ Select your bingo board (1-100)\n` +
             `3️⃣ Mark numbers as they're called\n` +
-            `4️⃣ Get 5 in a row to win!\n\n` +
-            `Good luck! 🍀`,
+            `4️⃣ Get 5 in a row to win the prize!\n\n` +
+            `<b>💰 Winning Patterns:</b>\n` +
+            `• Horizontal line (any row)\n` +
+            `• Vertical line (any column)\n` +
+            `• Diagonal line (corner to corner)\n\n` +
+            `<b>🎮 Commands:</b>\n` +
+            `🎮 /play - Start playing\n` +
+            `💰 /deposit - Add funds\n` +
+            `💸 /withdraw - Cash out\n` +
+            `🤑 /balance - Check balance\n` +
+            `🔗 /invite - Invite friends\n\n` +
+            `Good luck and have fun! 🍀`,
           {
             inline_keyboard: [
               [
                 {
-                  text: "🎮 Play Now",
+                  text: "🎮 Start Playing",
                   web_app: { url: APP_URL },
                 },
               ],
@@ -157,17 +171,107 @@ export async function POST(request: NextRequest) {
       case "/balance":
         await sendMessage(
           chatId,
-          `💰 <b>Your Balance</b>\n\n` +
-            `Current Balance: <b>0 ETB</b>\n` +
-            `Games Played: <b>0</b>\n` +
-            `Games Won: <b>0</b>\n\n` +
-            `💡 <i>Start playing to build your stats!</i>`,
+          `🤑 <b>Your Account Balance</b>\n\n` +
+            `💰 <b>Current Balance:</b> 0 ETB\n` +
+            `🎮 <b>Games Played:</b> 0\n` +
+            `🏆 <b>Games Won:</b> 0\n` +
+            `💸 <b>Total Winnings:</b> 0 ETB\n` +
+            `🔗 <b>Friends Invited:</b> 0\n\n` +
+            `💡 <i>Start playing to build your stats and earnings!</i>`,
           {
             inline_keyboard: [
               [
                 {
-                  text: "🎮 Start Playing",
+                  text: "💰 Deposit",
+                  web_app: { url: `${APP_URL}?page=deposit` },
+                },
+                {
+                  text: "💸 Withdraw",
+                  web_app: { url: `${APP_URL}?page=withdraw` },
+                },
+              ],
+              [
+                {
+                  text: "🎮 Play Now",
                   web_app: { url: APP_URL },
+                },
+              ],
+            ],
+          },
+        )
+        break
+
+      case "/deposit":
+        await sendMessage(
+          chatId,
+          `💰 <b>Deposit Funds</b>\n\n` +
+            `Add money to your Arada Bingo account to join games with higher stakes!\n\n` +
+            `<b>Available Methods:</b>\n` +
+            `💳 Credit/Debit Card\n` +
+            `📱 Mobile Money\n` +
+            `🏦 Bank Transfer\n\n` +
+            `Minimum deposit: <b>10 ETB</b>`,
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: "💰 Deposit Now",
+                  web_app: { url: `${APP_URL}?page=deposit` },
+                },
+              ],
+            ],
+          },
+        )
+        break
+
+      case "/withdraw":
+        await sendMessage(
+          chatId,
+          `💸 <b>Withdraw Winnings</b>\n\n` +
+            `Cash out your winnings from Arada Bingo!\n\n` +
+            `<b>Current Balance:</b> 0 ETB\n` +
+            `<b>Available to Withdraw:</b> 0 ETB\n\n` +
+            `<b>Withdrawal Methods:</b>\n` +
+            `📱 Mobile Money\n` +
+            `🏦 Bank Transfer\n\n` +
+            `Minimum withdrawal: <b>50 ETB</b>`,
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: "💸 Withdraw Now",
+                  web_app: { url: `${APP_URL}?page=withdraw` },
+                },
+              ],
+            ],
+          },
+        )
+        break
+
+      case "/invite":
+        await sendMessage(
+          chatId,
+          `🔗 <b>Invite Friends</b>\n\n` +
+            `Invite your friends to Arada Bingo and earn rewards!\n\n` +
+            `<b>Your Referral Benefits:</b>\n` +
+            `🎁 Get 10 ETB for each friend who joins\n` +
+            `💰 Earn 5% of their first deposit\n` +
+            `🏆 Unlock exclusive bonuses\n\n` +
+            `<b>Your Referral Link:</b>\n` +
+            `https://t.me/SetbBingoBot?start=ref_${chatId}\n\n` +
+            `Share this link with your friends!`,
+          {
+            inline_keyboard: [
+              [
+                {
+                  text: "📤 Share Referral Link",
+                  switch_inline_query: `🎮 Join me on Arada Bingo! Use my link to get bonus: https://t.me/SetbBingoBot?start=ref_${chatId}`,
+                },
+              ],
+              [
+                {
+                  text: "🔗 Invite Manager",
+                  web_app: { url: `${APP_URL}?page=invite` },
                 },
               ],
             ],

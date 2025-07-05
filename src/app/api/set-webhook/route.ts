@@ -1,9 +1,9 @@
-import { type NextRequest, NextResponse } from "next/server"
+import { NextResponse } from "next/server"
 
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN
 const WEBHOOK_URL = process.env.WEBHOOK_URL || `${process.env.NEXT_PUBLIC_APP_URL}/api/webhook`
 
-export async function POST(request: NextRequest) {
+export async function POST() {
   if (!TELEGRAM_BOT_TOKEN) {
     return NextResponse.json({ error: "TELEGRAM_BOT_TOKEN is not set" }, { status: 500 })
   }

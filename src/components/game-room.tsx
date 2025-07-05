@@ -17,7 +17,7 @@ export default function GameRoom({ roomId, stake, onBack }: GameRoomProps) {
   const [gameStarted, setGameStarted] = useState(false)
   const [currentNumber, setCurrentNumber] = useState<number | null>(null)
   const [calledNumbers, setCalledNumbers] = useState<number[]>([])
-  const [timeLeft, setTimeLeft] = useState(30)
+  const timeLeft = 30
 
   const startGame = () => {
     setGameStarted(true)

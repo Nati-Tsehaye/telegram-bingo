@@ -22,7 +22,6 @@ interface GameScreenProps {
 }
 
 export default function GameScreen({ room, onBack }: GameScreenProps) {
-  const [calledNumbers, setCalledNumbers] = useState<number[]>([]) // Remove all red numbers
   const [selectedBoardNumber, setSelectedBoardNumber] = useState<number | null>(null) // Green number from image
   const [selectedBoard, setSelectedBoard] = useState<BingoBoard | null>(null)
   const [gameStatus, setGameStatus] = useState<"waiting" | "active" | "starting">("waiting")

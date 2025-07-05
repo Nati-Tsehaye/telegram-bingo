@@ -24,8 +24,8 @@ interface BingoGameProps {
 
 export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProps) {
   const [isMuted, setIsMuted] = useState(false)
-  const [currentCall, setCurrentCall] = useState("G-52")
-  const [recentCalls, setRecentCalls] = useState(["G-52", "I-25", "N-42", "G-57"])
+  const currentCall = "G-52"
+  const recentCalls = ["G-52", "I-25", "N-42", "G-57"]
   // const [calledNumbers, setCalledNumbers] = useState<number[]>([16, 25, 42, 52])
   const [markedCells, setMarkedCells] = useState<boolean[][]>([
     [false, false, false, false, false],
