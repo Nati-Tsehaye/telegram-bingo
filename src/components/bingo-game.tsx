@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Volume2, VolumeX } from "lucide-react"
 import type { BingoBoard } from "@/data/bingo-boards"
-import type { GameRoom } from "@/lib/socket-server"
+import type { GameRoom } from "@/types/game"
 
 interface BingoGameProps {
   room: GameRoom

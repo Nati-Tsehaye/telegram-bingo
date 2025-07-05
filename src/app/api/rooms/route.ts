@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server"
-import type { GameRoom, Player, JoinRoomRequest } from "@/types/game"
+import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
 // In-memory storage (replace with Redis/Database in production)
 const gameRooms = new Map<string, GameRoom>()
@@ -20,7 +20,7 @@ function initializeRooms() {
           maxPlayers: 100, // Increased capacity
           status: "waiting",
           prize: 0,
-          createdAt: new Date().toISOString(),
+          createdAt: new Date(),
           activeGames: 0,
           hasBonus: true,
           gameStartTime: undefined,
@@ -36,10 +36,19 @@ export async function GET() {
   try {
     initializeRooms()
 
-    const rooms = Array.from(gameRooms.values()).map((room) => ({
-      ...room,
+    const rooms: GameRoomSummary[] = Array.from(gameRooms.values()).map((room) => ({
+      id: room.id,
+      stake: room.stake,
       players: room.players.length, // Only send count, not full player data
+      maxPlayers: room.maxPlayers,
+      status: room.status,
       prize: room.players.length * room.stake,
+      createdAt: room.createdAt.toISOString(),
+      activeGames: room.activeGames,
+      hasBonus: room.hasBonus,
+      gameStartTime: room.gameStartTime?.toISOString(),
+      calledNumbers: room.calledNumbers,
+      currentNumber: room.currentNumber,
     }))
 
     return NextResponse.json({
@@ -89,8 +98,7 @@ export async function POST(request: Request) {
           id: playerId,
           name: playerData?.name || "Guest Player",
           telegramId: playerData?.telegramId,
-          joinedAt: new Date().toISOString(),
-          isReady: false,
+          joinedAt: new Date(),
         }
 
         room.players.push(player)
@@ -107,7 +115,7 @@ export async function POST(request: Request) {
             const currentRoom = gameRooms.get(roomId)
             if (currentRoom && currentRoom.status === "starting") {
               currentRoom.status = "active"
-              currentRoom.gameStartTime = new Date().toISOString()
+              currentRoom.gameStartTime = new Date()
               currentRoom.activeGames = 1
             }
           }, 10000)
@@ -115,12 +123,10 @@ export async function POST(request: Request) {
 
         playerSessions.set(playerId, { roomId, lastActivity: Date.now() })
 
+        // Return the full room for joining player
         return NextResponse.json({
           success: true,
-          room: {
-            ...room,
-            players: room.players.length,
-          },
+          room,
           message: "Joined room successfully",
         })
 
@@ -153,16 +159,17 @@ export async function POST(request: Request) {
         if (playerRoom) {
           const player = playerRoom.players.find((p: Player) => p.id === playerId)
           if (player) {
-            player.isReady = true
+            // Add isReady property if it doesn't exist
+            ;(player as Player & { isReady?: boolean }).isReady = true
 
             // Check if all players are ready
-            const readyCount = playerRoom.players.filter((p: Player) => p.isReady).length
+            const readyCount = playerRoom.players.filter((p: Player & { isReady?: boolean }) => p.isReady).length
             if (readyCount >= 2 && readyCount === playerRoom.players.length) {
               playerRoom.status = "starting"
               setTimeout(() => {
                 if (playerRoom.status === "starting") {
                   playerRoom.status = "active"
-                  playerRoom.gameStartTime = new Date().toISOString()
+                  playerRoom.gameStartTime = new Date()
                   playerRoom.activeGames = 1
                 }
               }, 5000)

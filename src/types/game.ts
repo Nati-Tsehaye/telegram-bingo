@@ -2,8 +2,8 @@ export interface Player {
   id: string
   name: string
   telegramId?: number
-  joinedAt: string
-  isReady: boolean
+  avatar?: string
+  joinedAt: Date
 }
 
 export interface GameRoom {
@@ -13,11 +13,11 @@ export interface GameRoom {
   maxPlayers: number
   status: "waiting" | "starting" | "active" | "finished"
   prize: number
-  createdAt: string
-  activeGames: number
+  createdAt: Date
+  activeGames?: number
   hasBonus: boolean
-  gameStartTime?: string
-  calledNumbers: number[]
+  gameStartTime?: Date
+  calledNumbers?: number[]
   currentNumber?: number
 }
 
@@ -40,9 +40,24 @@ export interface Winner {
 
 export interface RoomResponse {
   success: boolean
-  rooms: GameRoom[]
+  rooms: GameRoomSummary[]
   totalPlayers: number
   timestamp: string
+}
+
+export interface GameRoomSummary {
+  id: string
+  stake: number
+  players: number // Just the count for API responses
+  maxPlayers: number
+  status: "waiting" | "starting" | "active" | "finished"
+  prize: number
+  createdAt: string
+  activeGames?: number
+  hasBonus: boolean
+  gameStartTime?: string
+  calledNumbers?: number[]
+  currentNumber?: number
 }
 
 export interface JoinRoomRequest {

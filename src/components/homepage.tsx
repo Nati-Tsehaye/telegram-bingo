@@ -6,12 +6,12 @@ import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins, User, Zap } from "lucide-react"
 import GameScreen from "@/components/game-screen"
 import { useTelegram } from "@/components/telegram-provider"
-import type { GameRoom, RoomResponse } from "@/types/game"
+import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
 export default function Homepage() {
   const { webApp, user, isReady } = useTelegram()
   const [activeTab, setActiveTab] = useState("Stake")
-  const [gameRooms, setGameRooms] = useState<GameRoom[]>([])
+  const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
   const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
@@ -54,7 +54,7 @@ export default function Homepage() {
     fetchRooms()
   }, [webApp, fetchRooms])
 
-  const handlePlay = async (room: GameRoom) => {
+  const handlePlay = async (room: GameRoomSummary) => {
     if (isConnecting) return
 
     webApp?.HapticFeedback.impactOccurred("heavy")
@@ -265,7 +265,7 @@ export default function Homepage() {
                           : "Finished"}
                   </div>
                   <div className="text-white/70 text-xs">
-                    {typeof room.players === "number" ? room.players : room.players.length}/{room.maxPlayers}
+                    {room.players}/{room.maxPlayers}
                   </div>
                 </div>
 
@@ -273,7 +273,7 @@ export default function Homepage() {
                 <div className="text-center">
                   <div className="text-2xl font-bold text-white flex items-center gap-1">
                     <Users className="h-5 w-5" />
-                    {typeof room.players === "number" ? room.players : room.players.length}
+                    {room.players}
                   </div>
                   <div className="text-white/70 text-xs">Players</div>
                 </div>
@@ -291,16 +291,12 @@ export default function Homepage() {
                 <div>
                   <Button
                     onClick={() => handlePlay(room)}
-                    disabled={
-                      isConnecting ||
-                      room.status !== "waiting" ||
-                      (typeof room.players === "number" ? room.players : room.players.length) >= room.maxPlayers
-                    }
+                    disabled={isConnecting || room.status !== "waiting" || room.players >= room.maxPlayers}
                     className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
                   >
                     {isConnecting
                       ? "Joining..."
-                      : (typeof room.players === "number" ? room.players : room.players.length) >= room.maxPlayers
+                      : room.players >= room.maxPlayers
                         ? "Full"
                         : room.status !== "waiting"
                           ? "Started"

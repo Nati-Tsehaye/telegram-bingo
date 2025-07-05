@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button"
 import { RefreshCw } from "lucide-react"
 import BingoGame from "./bingo-game"
 import { getBoardById, type BingoBoard } from "@/data/bingo-boards"
-import type { GameRoom } from "@/lib/socket-server"
+import type { GameRoom } from "@/types/game"
 
 interface GameScreenProps {
   room: GameRoom
