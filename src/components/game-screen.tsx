@@ -347,6 +347,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       >
         ←
       </button>
-    </div>
+    </div>//
   )
 }
