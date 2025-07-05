@@ -94,6 +94,7 @@ interface TelegramWebApp {
   sendData: (data: string) => void
   onEvent?: (eventType: string, eventHandler: () => void) => void
   offEvent?: (eventType: string, eventHandler: () => void) => void
+  enableClosingConfirmation?: () => void // Made optional
 }
 
 interface TelegramContextType {
@@ -133,7 +134,7 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
         tg.ready()
         tg.expand()
 
-        // Enable closing confirmation
+        // Enable closing confirmation if available
         if (tg.enableClosingConfirmation) {
           tg.enableClosingConfirmation()
         }
