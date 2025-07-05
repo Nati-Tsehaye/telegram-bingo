@@ -10,24 +10,22 @@ function initializeRooms() {
   if (gameRooms.size === 0) {
     const stakes = [10, 20, 50, 100, 200, 500]
     stakes.forEach((stake) => {
-      // Create multiple rooms per stake to handle more players
-      for (let i = 1; i <= 5; i++) {
-        const roomId = `room-${stake}-${i}`
-        gameRooms.set(roomId, {
-          id: roomId,
-          stake,
-          players: [],
-          maxPlayers: 100, // Increased capacity
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date(),
-          activeGames: 0,
-          hasBonus: true,
-          gameStartTime: undefined,
-          calledNumbers: [],
-          currentNumber: undefined,
-        })
-      }
+      // Create only ONE room per stake, not 5
+      const roomId = `room-${stake}`
+      gameRooms.set(roomId, {
+        id: roomId,
+        stake,
+        players: [],
+        maxPlayers: 100, // High capacity to handle many players
+        status: "waiting",
+        prize: 0,
+        createdAt: new Date(),
+        activeGames: 0,
+        hasBonus: true,
+        gameStartTime: undefined,
+        calledNumbers: [],
+        currentNumber: undefined,
+      })
     })
   }
 }
@@ -88,6 +86,16 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Game already started" }, { status: 400 })
         }
 
+        // Check if player is already in this room
+        const existingPlayer = room.players.find((p) => p.id === playerId)
+        if (existingPlayer) {
+          return NextResponse.json({
+            success: true,
+            room,
+            message: "Already in room",
+          })
+        }
+
         // Remove player from other rooms first
         gameRooms.forEach((r) => {
           r.players = r.players.filter((p: Player) => p.id !== playerId)
@@ -104,9 +112,9 @@ export async function POST(request: Request) {
         room.players.push(player)
         room.prize = room.players.length * room.stake
 
-        // Auto-start if enough players (minimum 2, or 80% capacity)
-        const minPlayers = Math.min(2, room.maxPlayers * 0.1)
-        const autoStartThreshold = Math.min(room.maxPlayers * 0.8, 50)
+        // Auto-start if enough players (minimum 2, or when room gets busy)
+        const minPlayers = 2
+        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10) // Start with 10% or 10 players max
 
         if (room.players.length >= minPlayers && room.players.length >= autoStartThreshold) {
           room.status = "starting"

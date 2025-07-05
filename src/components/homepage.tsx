@@ -39,13 +39,10 @@ export default function Homepage() {
     }
   }, [webApp])
 
-  // Auto-refresh rooms every 5 seconds
+  // Load rooms only once when component mounts and when returning to lobby
   useEffect(() => {
     if (isReady && currentScreen === "lobby") {
       fetchRooms()
-
-      const interval = setInterval(fetchRooms, 5000)
-      return () => clearInterval(interval)
     }
   }, [isReady, currentScreen, fetchRooms])
 
@@ -106,7 +103,7 @@ export default function Homepage() {
               setCurrentScreen("lobby")
               setSelectedRoom(null)
               webApp?.BackButton.hide()
-              fetchRooms() // Refresh rooms
+              fetchRooms() // Refresh rooms when returning
             })
           } else {
             webApp?.showAlert(data.error || "Failed to join room")
