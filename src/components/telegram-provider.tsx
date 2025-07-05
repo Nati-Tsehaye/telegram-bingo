@@ -92,6 +92,8 @@ interface TelegramWebApp {
   showAlert: (message: string, callback?: () => void) => void
   showConfirm: (message: string, callback?: (confirmed: boolean) => void) => void
   sendData: (data: string) => void
+  onEvent?: (eventType: string, eventHandler: () => void) => void
+  offEvent?: (eventType: string, eventHandler: () => void) => void
 }
 
 interface TelegramContextType {
@@ -125,14 +127,16 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
 
   useEffect(() => {
     if (typeof window !== "undefined") {
-      const tg = (window as any).Telegram?.WebApp
+      const tg = (window as unknown as { Telegram?: { WebApp: TelegramWebApp } }).Telegram?.WebApp
 
       if (tg) {
         tg.ready()
         tg.expand()
 
         // Enable closing confirmation
-        tg.enableClosingConfirmation()
+        if (tg.enableClosingConfirmation) {
+          tg.enableClosingConfirmation()
+        }
 
         // Set theme colors
         if (tg.themeParams) {

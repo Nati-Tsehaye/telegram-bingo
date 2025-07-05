@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -17,6 +17,54 @@ export default function BingoCard({ calledNumbers, currentNumber }: BingoCardPro
   const [markedCells, setMarkedCells] = useState<boolean[][]>([])
   const [hasWon, setHasWon] = useState(false)
   const { toast } = useToast()
+
+  const checkForWin = useCallback(
+    (marked: boolean[][]) => {
+      // Check rows
+      for (let row = 0; row < 5; row++) {
+        if (marked.every((col) => col[row])) {
+          setHasWon(true)
+          toast({
+            title: "🎉 BINGO!",
+            description: "You got a horizontal line!",
+          })
+          return
+        }
+      }
+
+      // Check columns
+      for (let col = 0; col < 5; col++) {
+        if (marked[col].every((cell) => cell)) {
+          setHasWon(true)
+          toast({
+            title: "🎉 BINGO!",
+            description: "You got a vertical line!",
+          })
+          return
+        }
+      }
+
+      // Check diagonals
+      if (marked.every((col, index) => col[index])) {
+        setHasWon(true)
+        toast({
+          title: "🎉 BINGO!",
+          description: "You got a diagonal line!",
+        })
+        return
+      }
+
+      if (marked.every((col, index) => col[4 - index])) {
+        setHasWon(true)
+        toast({
+          title: "🎉 BINGO!",
+          description: "You got a diagonal line!",
+        })
+        return
+      }
+    },
+    [toast],
+  )
 
   // Generate bingo card
   useEffect(() => {
@@ -78,52 +126,7 @@ export default function BingoCard({ calledNumbers, currentNumber }: BingoCardPro
         checkForWin(newMarked)
       }
     }
-  }, [calledNumbers, bingoNumbers, markedCells])
-
-  const checkForWin = (marked: boolean[][]) => {
-    // Check rows
-    for (let row = 0; row < 5; row++) {
-      if (marked.every((col) => col[row])) {
-        setHasWon(true)
-        toast({
-          title: "🎉 BINGO!",
-          description: "You got a horizontal line!",
-        })
-        return
-      }
-    }
-
-    // Check columns
-    for (let col = 0; col < 5; col++) {
-      if (marked[col].every((cell) => cell)) {
-        setHasWon(true)
-        toast({
-          title: "🎉 BINGO!",
-          description: "You got a vertical line!",
-        })
-        return
-      }
-    }
-
-    // Check diagonals
-    if (marked.every((col, index) => col[index])) {
-      setHasWon(true)
-      toast({
-        title: "🎉 BINGO!",
-        description: "You got a diagonal line!",
-      })
-      return
-    }
-
-    if (marked.every((col, index) => col[4 - index])) {
-      setHasWon(true)
-      toast({
-        title: "🎉 BINGO!",
-        description: "You got a diagonal line!",
-      })
-      return
-    }
-  }
+  }, [calledNumbers, bingoNumbers, markedCells, checkForWin])
 
   const toggleCell = (col: number, row: number) => {
     if (bingoNumbers[col][row] === 0) return // Free space

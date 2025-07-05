@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins, User } from "lucide-react"
@@ -60,6 +60,22 @@ export default function Homepage() {
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
   const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
 
+  const handleRefresh = useCallback(() => {
+    webApp?.HapticFeedback.impactOccurred("medium")
+
+    // Simulate refreshing room data
+    setGameRooms((prev) =>
+      prev.map((room) => ({
+        ...room,
+        players: Math.floor(Math.random() * 30) + 1,
+        prize: room.stake * (Math.floor(Math.random() * 20) + 5),
+      })),
+    )
+
+    // Show success feedback
+    webApp?.showAlert("Rooms refreshed successfully!")
+  }, [webApp])
+
   useEffect(() => {
     if (webApp) {
       // Configure main button
@@ -80,23 +96,7 @@ export default function Homepage() {
         webApp.MainButton.hide()
       }
     }
-  }, [webApp])
-
-  const handleRefresh = () => {
-    webApp?.HapticFeedback.impactOccurred("medium")
-
-    // Simulate refreshing room data
-    setGameRooms((prev) =>
-      prev.map((room) => ({
-        ...room,
-        players: Math.floor(Math.random() * 30) + 1,
-        prize: room.stake * (Math.floor(Math.random() * 20) + 5),
-      })),
-    )
-
-    // Show success feedback
-    webApp?.showAlert("Rooms refreshed successfully!")
-  }
+  }, [webApp, handleRefresh])
 
   const handlePlay = (room: GameRoom) => {
     webApp?.HapticFeedback.impactOccurred("heavy")
