@@ -29,7 +29,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   const [activeGames, setActiveGames] = useState(room.activeGames || 0)
   const [showBingoGame, setShowBingoGame] = useState(false)
   const [boardSelections, setBoardSelections] = useState<BoardSelection[]>([])
-  const [selectedNumbers, setSelectedNumbers] = useState<number[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
   const playerId = user?.id?.toString() || `guest-${Date.now()}`
@@ -46,7 +45,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
       if (data.success) {
         setBoardSelections(data.selections)
-        setSelectedNumbers(data.selectedNumbers)
       }
     } catch (error) {
       console.error("Failed to fetch board selections:", error)
