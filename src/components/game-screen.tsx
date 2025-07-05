@@ -46,7 +46,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     // Select new board number
     setSelectedBoardNumber(number)
     const board = getBoardById(number)
-    setSelectedBoard(board)
+    setSelectedBoard(board || null) // Fix: Handle undefined case
   }
 
   const handleStartGame = () => {
