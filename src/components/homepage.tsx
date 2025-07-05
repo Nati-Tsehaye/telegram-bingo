@@ -21,7 +21,7 @@ export default function Homepage() {
   // Initialize socket connection
   useEffect(() => {
     if (isReady) {
-      const socket = socketClient.connect()
+      socketClient.connect()
 
       // Listen for room updates
       socketClient.onRoomsUpdate((rooms) => {
