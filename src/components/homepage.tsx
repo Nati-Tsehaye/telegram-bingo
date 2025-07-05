@@ -40,6 +40,7 @@ export default function Homepage() {
   }, [webApp])
 
   // Load rooms only once when component mounts and when returning to lobby
+  // NO AUTO-REFRESH - only manual refresh
   useEffect(() => {
     if (isReady && currentScreen === "lobby") {
       fetchRooms()
@@ -56,66 +57,62 @@ export default function Homepage() {
 
     webApp?.HapticFeedback.impactOccurred("heavy")
 
-    // Show confirmation before joining
-    webApp?.showConfirm(`Join room with ${room.stake} ETB stake?`, async (confirmed) => {
-      if (confirmed) {
-        setIsConnecting(true)
+    // NO CONFIRMATION DIALOG - join directly
+    setIsConnecting(true)
 
-        try {
-          const playerId = user?.id?.toString() || `guest-${Date.now()}`
-          const response = await fetch("/api/rooms", {
+    try {
+      const playerId = user?.id?.toString() || `guest-${Date.now()}`
+      const response = await fetch("/api/rooms", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "join",
+          roomId: room.id,
+          playerId,
+          playerData: {
+            name: user?.first_name || "Guest Player",
+            telegramId: user?.id,
+          },
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setSelectedRoom(data.room)
+        setCurrentScreen("game")
+
+        // Configure back button
+        webApp?.BackButton.show()
+        webApp?.BackButton.onClick(async () => {
+          // Leave room when going back
+          await fetch("/api/rooms", {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({
-              action: "join",
-              roomId: room.id,
+              action: "leave",
               playerId,
-              playerData: {
-                name: user?.first_name || "Guest Player",
-                telegramId: user?.id,
-              },
             }),
           })
 
-          const data = await response.json()
-
-          if (data.success) {
-            setSelectedRoom(data.room)
-            setCurrentScreen("game")
-
-            // Configure back button
-            webApp?.BackButton.show()
-            webApp?.BackButton.onClick(async () => {
-              // Leave room when going back
-              await fetch("/api/rooms", {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                  action: "leave",
-                  playerId,
-                }),
-              })
-
-              setCurrentScreen("lobby")
-              setSelectedRoom(null)
-              webApp?.BackButton.hide()
-              fetchRooms() // Refresh rooms when returning
-            })
-          } else {
-            webApp?.showAlert(data.error || "Failed to join room")
-          }
-        } catch (error) {
-          console.error("Failed to join room:", error)
-          webApp?.showAlert("Failed to join room. Please try again.")
-        } finally {
-          setIsConnecting(false)
-        }
+          setCurrentScreen("lobby")
+          setSelectedRoom(null)
+          webApp?.BackButton.hide()
+          fetchRooms() // Refresh rooms when returning
+        })
+      } else {
+        webApp?.showAlert(data.error || "Failed to join room")
       }
-    })
+    } catch (error) {
+      console.error("Failed to join room:", error)
+      webApp?.showAlert("Failed to join room. Please try again.")
+    } finally {
+      setIsConnecting(false)
+    }
   }
 
   // Configure main button
