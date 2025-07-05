@@ -16,52 +16,20 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url)
     const roomId = searchParams.get("roomId")
 
-    console.log("GET board-selections for room:", roomId)
-
     if (!roomId) {
-      return NextResponse.json(
-        { error: "Room ID required" },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
-        },
-      )
+      return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
     const selections = boardSelections.get(roomId) || []
-    console.log("Returning selections:", selections)
 
-    return NextResponse.json(
-      {
-        success: true,
-        selections,
-        selectedNumbers: selections.map((s) => s.boardNumber),
-      },
-      {
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      },
-    )
+    return NextResponse.json({
+      success: true,
+      selections,
+      selectedNumbers: selections.map((s) => s.boardNumber),
+    })
   } catch (error) {
     console.error("Error fetching board selections:", error)
-    return NextResponse.json(
-      { error: "Failed to fetch selections" },
-      {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      },
-    )
+    return NextResponse.json({ error: "Failed to fetch selections" }, { status: 500 })
   }
 }
 
@@ -69,20 +37,8 @@ export async function POST(request: Request) {
   try {
     const { roomId, playerId, playerName, boardNumber, action } = await request.json()
 
-    console.log("POST board-selections:", { roomId, playerId, playerName, boardNumber, action })
-
     if (!roomId || !playerId) {
-      return NextResponse.json(
-        { error: "Room ID and Player ID required" },
-        {
-          status: 400,
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
-        },
-      )
+      return NextResponse.json({ error: "Room ID and Player ID required" }, { status: 400 })
     }
 
     let selections = boardSelections.get(roomId) || []
@@ -91,20 +47,12 @@ export async function POST(request: Request) {
       // Check if number is already taken by another player
       const existingSelection = selections.find((s) => s.boardNumber === boardNumber && s.playerId !== playerId)
       if (existingSelection) {
-        console.log("Board already taken:", existingSelection)
         return NextResponse.json(
           {
             error: `Board ${boardNumber} is already selected by ${existingSelection.playerName}`,
             takenBy: existingSelection.playerName,
           },
-          {
-            status: 400,
-            headers: {
-              "Access-Control-Allow-Origin": "*",
-              "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-              "Access-Control-Allow-Headers": "Content-Type",
-            },
-          },
+          { status: 400 },
         )
       }
 
@@ -123,85 +71,30 @@ export async function POST(request: Request) {
       selections.push(newSelection)
       boardSelections.set(roomId, selections)
 
-      console.log("Board selected successfully:", newSelection)
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: `Board ${boardNumber} selected successfully`,
-          selections,
-          selectedNumbers: selections.map((s) => s.boardNumber),
-        },
-        {
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
-        },
-      )
+      return NextResponse.json({
+        success: true,
+        message: `Board ${boardNumber} selected successfully`,
+        selections,
+        selectedNumbers: selections.map((s) => s.boardNumber),
+      })
     }
 
     if (action === "deselect") {
       // Remove selection by this player
-      const originalLength = selections.length
       selections = selections.filter((s) => s.playerId !== playerId)
       boardSelections.set(roomId, selections)
 
-      console.log("Board deselected:", { originalLength, newLength: selections.length })
-
-      return NextResponse.json(
-        {
-          success: true,
-          message: "Selection removed",
-          selections,
-          selectedNumbers: selections.map((s) => s.boardNumber),
-        },
-        {
-          headers: {
-            "Access-Control-Allow-Origin": "*",
-            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-            "Access-Control-Allow-Headers": "Content-Type",
-          },
-        },
-      )
+      return NextResponse.json({
+        success: true,
+        message: "Selection removed",
+        selections,
+        selectedNumbers: selections.map((s) => s.boardNumber),
+      })
     }
 
-    return NextResponse.json(
-      { error: "Invalid action" },
-      {
-        status: 400,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      },
-    )
+    return NextResponse.json({ error: "Invalid action" }, { status: 400 })
   } catch (error) {
     console.error("Error handling board selection:", error)
-    return NextResponse.json(
-      { error: "Failed to handle selection" },
-      {
-        status: 500,
-        headers: {
-          "Access-Control-Allow-Origin": "*",
-          "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-          "Access-Control-Allow-Headers": "Content-Type",
-        },
-      },
-    )
+    return NextResponse.json({ error: "Failed to handle selection" }, { status: 500 })
   }
-}
-
-// Add OPTIONS handler for CORS preflight
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: {
-      "Access-Control-Allow-Origin": "*",
-      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-      "Access-Control-Allow-Headers": "Content-Type",
-    },
-  })
 }
