@@ -1,27 +1,9 @@
 import { NextResponse } from "next/server"
+import type { GameRoom, Player, JoinRoomRequest } from "@/types/game"
 
 // In-memory storage (replace with Redis/Database in production)
-const gameRooms = new Map<string, any>()
-const playerSessions = new Map<string, any>()
-
-// Mock room data generator
-function generateMockRooms() {
-  const stakes = [10, 20, 50, 100]
-  return stakes.map((stake, index) => ({
-    id: `room-${stake}-${Date.now()}-${index}`,
-    stake,
-    players: Math.floor(Math.random() * 8) + 1, // 1-8 players
-    maxPlayers: 10,
-    status: Math.random() > 0.7 ? "active" : "waiting",
-    prize: (Math.floor(Math.random() * 8) + 1) * stake,
-    createdAt: new Date().toISOString(),
-    activeGames: Math.random() > 0.5 ? 1 : 0,
-    hasBonus: true,
-    gameStartTime: null,
-    calledNumbers: [],
-    currentNumber: null,
-  }))
-}
+const gameRooms = new Map<string, GameRoom>()
+const playerSessions = new Map<string, { roomId: string; lastActivity: number }>()
 
 // Initialize default rooms if empty
 function initializeRooms() {
@@ -41,9 +23,9 @@ function initializeRooms() {
           createdAt: new Date().toISOString(),
           activeGames: 0,
           hasBonus: true,
-          gameStartTime: null,
+          gameStartTime: undefined,
           calledNumbers: [],
-          currentNumber: null,
+          currentNumber: undefined,
         })
       }
     })
@@ -74,12 +56,16 @@ export async function GET() {
 
 export async function POST(request: Request) {
   try {
-    const { action, roomId, playerId, playerData } = await request.json()
+    const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
 
     initializeRooms()
 
     switch (action) {
       case "join":
+        if (!roomId) {
+          return NextResponse.json({ error: "Room ID required" }, { status: 400 })
+        }
+
         const room = gameRooms.get(roomId)
         if (!room) {
           return NextResponse.json({ error: "Room not found" }, { status: 404 })
@@ -94,15 +80,15 @@ export async function POST(request: Request) {
         }
 
         // Remove player from other rooms first
-        gameRooms.forEach((r, id) => {
-          r.players = r.players.filter((p: any) => p.id !== playerId)
+        gameRooms.forEach((r) => {
+          r.players = r.players.filter((p: Player) => p.id !== playerId)
         })
 
         // Add player to new room
-        const player = {
+        const player: Player = {
           id: playerId,
-          name: playerData.name,
-          telegramId: playerData.telegramId,
+          name: playerData?.name || "Guest Player",
+          telegramId: playerData?.telegramId,
           joinedAt: new Date().toISOString(),
           isReady: false,
         }
@@ -139,8 +125,8 @@ export async function POST(request: Request) {
         })
 
       case "leave":
-        gameRooms.forEach((room, id) => {
-          room.players = room.players.filter((p: any) => p.id !== playerId)
+        gameRooms.forEach((room) => {
+          room.players = room.players.filter((p: Player) => p.id !== playerId)
           room.prize = room.players.length * room.stake
 
           // Reset room if empty
@@ -148,7 +134,7 @@ export async function POST(request: Request) {
             room.status = "waiting"
             room.activeGames = 0
             room.calledNumbers = []
-            room.currentNumber = null
+            room.currentNumber = undefined
           }
         })
 
@@ -161,16 +147,16 @@ export async function POST(request: Request) {
 
       case "ready":
         const playerRoom = Array.from(gameRooms.values()).find((room) =>
-          room.players.some((p: any) => p.id === playerId),
+          room.players.some((p: Player) => p.id === playerId),
         )
 
         if (playerRoom) {
-          const player = playerRoom.players.find((p: any) => p.id === playerId)
+          const player = playerRoom.players.find((p: Player) => p.id === playerId)
           if (player) {
             player.isReady = true
 
             // Check if all players are ready
-            const readyCount = playerRoom.players.filter((p: any) => p.isReady).length
+            const readyCount = playerRoom.players.filter((p: Player) => p.isReady).length
             if (readyCount >= 2 && readyCount === playerRoom.players.length) {
               playerRoom.status = "starting"
               setTimeout(() => {

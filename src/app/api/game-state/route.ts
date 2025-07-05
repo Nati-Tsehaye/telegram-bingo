@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
+import type { GameState, GameStateRequest, Winner } from "@/types/game"
 
 // This would be replaced with Redis or Database in production
-const gameStates = new Map<string, any>()
+const gameStates = new Map<string, GameState>()
 
 export async function GET(request: Request) {
   try {
@@ -12,7 +13,7 @@ export async function GET(request: Request) {
       return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
-    const gameState = gameStates.get(roomId) || {
+    const gameState: GameState = gameStates.get(roomId) || {
       roomId,
       calledNumbers: [],
       currentNumber: null,
@@ -33,13 +34,13 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { roomId, action, data } = await request.json()
+    const { roomId, action, data }: GameStateRequest = await request.json()
 
     if (!roomId) {
       return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
-    let gameState = gameStates.get(roomId) || {
+    let gameState: GameState = gameStates.get(roomId) || {
       roomId,
       calledNumbers: [],
       currentNumber: null,
@@ -64,16 +65,19 @@ export async function POST(request: Request) {
         break
 
       case "claim-bingo":
-        const { playerId, playerName, winningPattern } = data
-        gameState.winners.push({
-          playerId,
-          playerName,
-          winningPattern,
-          timestamp: new Date().toISOString(),
-        })
+        if (data?.playerId && data?.playerName && data?.winningPattern) {
+          const winner: Winner = {
+            playerId: data.playerId,
+            playerName: data.playerName,
+            winningPattern: data.winningPattern,
+            timestamp: new Date().toISOString(),
+          }
 
-        if (gameState.winners.length === 1) {
-          gameState.gameStatus = "finished"
+          gameState.winners.push(winner)
+
+          if (gameState.winners.length === 1) {
+            gameState.gameStatus = "finished"
+          }
         }
         break
 

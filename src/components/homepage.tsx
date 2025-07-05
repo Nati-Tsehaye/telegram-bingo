@@ -6,13 +6,14 @@ import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins, User, Zap } from "lucide-react"
 import GameScreen from "@/components/game-screen"
 import { useTelegram } from "@/components/telegram-provider"
+import type { GameRoom, RoomResponse } from "@/types/game"
 
 export default function Homepage() {
   const { webApp, user, isReady } = useTelegram()
   const [activeTab, setActiveTab] = useState("Stake")
-  const [gameRooms, setGameRooms] = useState<any[]>([])
+  const [gameRooms, setGameRooms] = useState<GameRoom[]>([])
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
-  const [selectedRoom, setSelectedRoom] = useState<any>(null)
+  const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
   const [isConnecting, setIsConnecting] = useState(false)
   const [isLoading, setIsLoading] = useState(true)
   const [totalPlayers, setTotalPlayers] = useState(0)
@@ -23,7 +24,7 @@ export default function Homepage() {
     try {
       setIsLoading(true)
       const response = await fetch("/api/rooms")
-      const data = await response.json()
+      const data: RoomResponse = await response.json()
 
       if (data.success) {
         setGameRooms(data.rooms)
@@ -53,7 +54,7 @@ export default function Homepage() {
     fetchRooms()
   }, [webApp, fetchRooms])
 
-  const handlePlay = async (room: any) => {
+  const handlePlay = async (room: GameRoom) => {
     if (isConnecting) return
 
     webApp?.HapticFeedback.impactOccurred("heavy")
@@ -264,7 +265,7 @@ export default function Homepage() {
                           : "Finished"}
                   </div>
                   <div className="text-white/70 text-xs">
-                    {room.players}/{room.maxPlayers}
+                    {typeof room.players === "number" ? room.players : room.players.length}/{room.maxPlayers}
                   </div>
                 </div>
 
@@ -272,7 +273,7 @@ export default function Homepage() {
                 <div className="text-center">
                   <div className="text-2xl font-bold text-white flex items-center gap-1">
                     <Users className="h-5 w-5" />
-                    {room.players}
+                    {typeof room.players === "number" ? room.players : room.players.length}
                   </div>
                   <div className="text-white/70 text-xs">Players</div>
                 </div>
@@ -290,12 +291,16 @@ export default function Homepage() {
                 <div>
                   <Button
                     onClick={() => handlePlay(room)}
-                    disabled={isConnecting || room.status !== "waiting" || room.players >= room.maxPlayers}
+                    disabled={
+                      isConnecting ||
+                      room.status !== "waiting" ||
+                      (typeof room.players === "number" ? room.players : room.players.length) >= room.maxPlayers
+                    }
                     className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
                   >
                     {isConnecting
                       ? "Joining..."
-                      : room.players >= room.maxPlayers
+                      : (typeof room.players === "number" ? room.players : room.players.length) >= room.maxPlayers
                         ? "Full"
                         : room.status !== "waiting"
                           ? "Started"
