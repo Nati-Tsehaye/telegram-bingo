@@ -14,7 +14,7 @@ export default function Homepage() {
   const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
   const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
-  const [isConnecting, setIsConnecting] = useState(false)
+  const [connectingRoomId, setConnectingRoomId] = useState<string | null>(null) // Track which room is connecting
   const [isLoading, setIsLoading] = useState(true)
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
@@ -53,12 +53,12 @@ export default function Homepage() {
   }, [webApp, fetchRooms])
 
   const handlePlay = async (room: GameRoomSummary) => {
-    if (isConnecting) return
+    if (connectingRoomId) return // Prevent multiple simultaneous connections
 
     webApp?.HapticFeedback.impactOccurred("heavy")
 
-    // NO CONFIRMATION DIALOG - join directly
-    setIsConnecting(true)
+    // Set the connecting room ID to show loading state for this specific room
+    setConnectingRoomId(room.id)
 
     try {
       const playerId = user?.id?.toString() || `guest-${Date.now()}`
@@ -111,7 +111,7 @@ export default function Homepage() {
       console.error("Failed to join room:", error)
       webApp?.showAlert("Failed to join room. Please try again.")
     } finally {
-      setIsConnecting(false)
+      setConnectingRoomId(null) // Clear the connecting state
     }
   }
 
@@ -221,85 +221,91 @@ export default function Homepage() {
             </Button>
           </div>
         ) : (
-          gameRooms.map((room) => (
-            <div
-              key={room.id}
-              className="relative bg-blue-800/50 backdrop-blur-sm border border-blue-600/30 rounded-lg p-4"
-            >
-              {/* Status Indicators */}
-              <div className="absolute top-2 right-2 flex gap-2">
-                {room.status === "active" && (
-                  <Badge className="bg-red-500 hover:bg-red-600 text-white text-xs">
-                    <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
-                    Live
-                  </Badge>
-                )}
-                {room.status === "starting" && (
-                  <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs">Starting...</Badge>
-                )}
-                {room.hasBonus && <Badge className="bg-purple-500 hover:bg-purple-600 text-white text-xs">Bonus</Badge>}
+          gameRooms.map((room) => {
+            const isConnecting = connectingRoomId === room.id
+
+            return (
+              <div
+                key={room.id}
+                className="relative bg-blue-800/50 backdrop-blur-sm border border-blue-600/30 rounded-lg p-4"
+              >
+                {/* Status Indicators */}
+                <div className="absolute top-2 right-2 flex gap-2">
+                  {room.status === "active" && (
+                    <Badge className="bg-red-500 hover:bg-red-600 text-white text-xs">
+                      <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
+                      Live
+                    </Badge>
+                  )}
+                  {room.status === "starting" && (
+                    <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs">Starting...</Badge>
+                  )}
+                  {room.hasBonus && (
+                    <Badge className="bg-purple-500 hover:bg-purple-600 text-white text-xs">Bonus</Badge>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  {/* Stake */}
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-white mb-1">{room.stake}</div>
+                    <div className="text-white/70 text-xs">ETB</div>
+                  </div>
+
+                  {/* Room Status */}
+                  <div className="text-center">
+                    <div className="text-white text-sm">
+                      {room.status === "waiting"
+                        ? "Waiting"
+                        : room.status === "starting"
+                          ? "Starting"
+                          : room.status === "active"
+                            ? "Playing"
+                            : "Finished"}
+                    </div>
+                    <div className="text-white/70 text-xs">
+                      {room.players}/{room.maxPlayers}
+                    </div>
+                  </div>
+
+                  {/* Players */}
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-white flex items-center gap-1">
+                      <Users className="h-5 w-5" />
+                      {room.players}
+                    </div>
+                    <div className="text-white/70 text-xs">Players</div>
+                  </div>
+
+                  {/* Prize */}
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-white flex items-center gap-1">
+                      <Coins className="h-5 w-5 text-yellow-400" />
+                      {room.prize}
+                    </div>
+                    <div className="text-white/70 text-xs">Prize</div>
+                  </div>
+
+                  {/* Play Button */}
+                  <div>
+                    <Button
+                      onClick={() => handlePlay(room)}
+                      disabled={isConnecting || room.status !== "waiting" || room.players >= room.maxPlayers}
+                      className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
+                    >
+                      {isConnecting
+                        ? "Joining..."
+                        : room.players >= room.maxPlayers
+                          ? "Full"
+                          : room.status !== "waiting"
+                            ? "Started"
+                            : "Play"}
+                    </Button>
+                  </div>
+                </div>
               </div>
-
-              <div className="flex items-center justify-between">
-                {/* Stake */}
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-white mb-1">{room.stake}</div>
-                  <div className="text-white/70 text-xs">ETB</div>
-                </div>
-
-                {/* Room Status */}
-                <div className="text-center">
-                  <div className="text-white text-sm">
-                    {room.status === "waiting"
-                      ? "Waiting"
-                      : room.status === "starting"
-                        ? "Starting"
-                        : room.status === "active"
-                          ? "Playing"
-                          : "Finished"}
-                  </div>
-                  <div className="text-white/70 text-xs">
-                    {room.players}/{room.maxPlayers}
-                  </div>
-                </div>
-
-                {/* Players */}
-                <div className="text-center">
-                  <div className="text-2xl font-bold text-white flex items-center gap-1">
-                    <Users className="h-5 w-5" />
-                    {room.players}
-                  </div>
-                  <div className="text-white/70 text-xs">Players</div>
-                </div>
-
-                {/* Prize */}
-                <div className="text-center">
-                  <div className="text-xl font-bold text-white flex items-center gap-1">
-                    <Coins className="h-5 w-5 text-yellow-400" />
-                    {room.prize}
-                  </div>
-                  <div className="text-white/70 text-xs">Prize</div>
-                </div>
-
-                {/* Play Button */}
-                <div>
-                  <Button
-                    onClick={() => handlePlay(room)}
-                    disabled={isConnecting || room.status !== "waiting" || room.players >= room.maxPlayers}
-                    className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
-                  >
-                    {isConnecting
-                      ? "Joining..."
-                      : room.players >= room.maxPlayers
-                        ? "Full"
-                        : room.status !== "waiting"
-                          ? "Started"
-                          : "Play"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-          ))
+            )
+          })
         )}
       </div>
 

@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react"
 import { Button } from "@/components/ui/button"
-import { RefreshCw, Users } from "lucide-react"
+import { RefreshCw } from "lucide-react"
 import BingoGame from "./bingo-game"
 import { getBoardById, type BingoBoard } from "@/data/bingo-boards"
 import { useTelegram } from "@/components/telegram-provider"
@@ -227,14 +227,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
         </div>
       </div>
 
-      {/* Players Info */}
-      <div className="flex justify-center mb-4">
-        <div className="bg-white/20 backdrop-blur-sm rounded-lg px-4 py-2 flex items-center gap-2">
-          <Users className="h-4 w-4 text-white" />
-          <span className="text-white font-medium">{boardSelections.length} players selected boards</span>
-        </div>
-      </div>
-
       {/* Numbers Grid */}
       <div className="max-w-2xl mx-auto mb-6">
         <div className="grid grid-cols-10 gap-2">
@@ -271,22 +263,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
               </button>
             )
           })}
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex justify-center gap-6 mb-4">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-green-500 rounded"></div>
-          <span className="text-white text-sm">Your Selection</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-red-500 rounded"></div>
-          <span className="text-white text-sm">Taken by Others</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 bg-white/20 border border-white/30 rounded"></div>
-          <span className="text-white text-sm">Available</span>
         </div>
       </div>
 
