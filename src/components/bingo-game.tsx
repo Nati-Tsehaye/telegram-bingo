@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, useRef } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Volume2, VolumeX } from "lucide-react"
@@ -47,9 +47,46 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     [false, false, false, false, false],
   ])
   const [isLoading, setIsLoading] = useState(false)
+  const [lastPlayedNumber, setLastPlayedNumber] = useState<number | null>(null)
+
+  // Audio ref for playing number sounds
+  const audioRef = useRef<HTMLAudioElement | null>(null)
 
   const bingoLetters = ["B", "I", "N", "G", "O"]
   const letterColors = ["bg-yellow-500", "bg-green-500", "bg-blue-500", "bg-orange-500", "bg-purple-500"]
+
+  // Function to play audio for called number
+  const playNumberAudio = useCallback(
+    (number: number) => {
+      if (isMuted) return
+
+      try {
+        // Create new audio instance for each call to avoid conflicts
+        const audio = new Audio(`/audio/men/${number}.mp3`)
+        audio.volume = 0.7 // Set volume to 70%
+
+        audio.play().catch((error) => {
+          console.warn(`Failed to play audio for number ${number}:`, error)
+        })
+
+        // Clean up after playing
+        audio.addEventListener("ended", () => {
+          audio.remove()
+        })
+
+        // Fallback cleanup after 5 seconds
+        setTimeout(() => {
+          if (audio) {
+            audio.pause()
+            audio.remove()
+          }
+        }, 5000)
+      } catch (error) {
+        console.warn(`Error creating audio for number ${number}:`, error)
+      }
+    },
+    [isMuted],
+  )
 
   // Generate 15x5 calling board (1-75)
   const generateCallingBoard = useCallback(() => {
@@ -76,6 +113,17 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       if (data.success) {
         const newGameState = data.gameState
 
+        // Check if there's a new number called and play audio
+        if (
+          newGameState.currentNumber &&
+          newGameState.currentNumber !== gameState.currentNumber &&
+          newGameState.currentNumber !== lastPlayedNumber
+        ) {
+          console.log(`New number called: ${newGameState.currentNumber}`)
+          playNumberAudio(newGameState.currentNumber)
+          setLastPlayedNumber(newGameState.currentNumber)
+        }
+
         // Update recent calls when current number changes
         if (newGameState.currentNumber !== gameState.currentNumber && gameState.currentNumber !== null) {
           setRecentCalls((prev) => {
@@ -89,7 +137,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     } catch (error) {
       console.error("Failed to fetch game state:", error)
     }
-  }, [room.id, gameState.currentNumber])
+  }, [room.id, gameState.currentNumber, lastPlayedNumber, playNumberAudio])
 
   // Start the game
   const startGame = useCallback(async () => {
@@ -136,6 +184,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       if (data.success) {
         setGameState(data.gameState)
         setRecentCalls([])
+        setLastPlayedNumber(null)
         setMarkedCells([
           [false, false, false, false, false],
           [false, false, false, false, false],
@@ -213,6 +262,17 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     const newMarked = [...markedCells]
     newMarked[row][col] = !newMarked[row][col]
     setMarkedCells(newMarked)
+  }
+
+  // Handle mute toggle
+  const handleMuteToggle = () => {
+    setIsMuted(!isMuted)
+
+    // Stop any currently playing audio when muting
+    if (!isMuted && audioRef.current) {
+      audioRef.current.pause()
+      audioRef.current.currentTime = 0
+    }
   }
 
   // Get the BINGO letter for a number
@@ -317,11 +377,13 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => setIsMuted(!isMuted)}
-              className="text-white hover:bg-white/10 bg-orange-500 px-2 py-1"
+              onClick={handleMuteToggle}
+              className={`text-white hover:bg-white/10 px-2 py-1 ${
+                isMuted ? "bg-red-500 hover:bg-red-600" : "bg-orange-500 hover:bg-orange-600"
+              }`}
             >
               {isMuted ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
-              <span className="ml-1 text-xs">Mute</span>
+              <span className="ml-1 text-xs">{isMuted ? "Unmute" : "Mute"}</span>
             </Button>
           </div>
 
@@ -418,6 +480,9 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           Leave
         </Button>
       </div>
+
+      {/* Hidden audio element for preloading */}
+      <audio ref={audioRef} preload="none" style={{ display: "none" }} />
     </div>
   )
 }
