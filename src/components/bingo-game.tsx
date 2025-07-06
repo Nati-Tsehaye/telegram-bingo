@@ -54,7 +54,6 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   const [isLoading, setIsLoading] = useState(false)
   const [lastPlayedNumber, setLastPlayedNumber] = useState<number | null>(null)
   const [hasBingo, setHasBingo] = useState(false)
-  const [winningPattern, setWinningPattern] = useState<WinPattern | null>(null)
   const [winningCells, setWinningCells] = useState<boolean[][]>([
     [false, false, false, false, false],
     [false, false, false, false, false],
@@ -366,7 +365,6 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         setRecentCalls([])
         setLastPlayedNumber(null)
         setHasBingo(false)
-        setWinningPattern(null)
         setBingoClaimed(false)
         setWinningCells([
           [false, false, false, false, false],
@@ -440,7 +438,6 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         if (hasWin && !hasBingo && !bingoClaimed) {
           console.log(`BINGO detected: ${pattern}`)
           setHasBingo(true)
-          setWinningPattern(pattern)
           setWinningCells(cells)
           autoClaimBingo(pattern!)
         }
@@ -470,12 +467,10 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     if (hasWin && !hasBingo && !bingoClaimed) {
       console.log(`BINGO detected (manual): ${pattern}`)
       setHasBingo(true)
-      setWinningPattern(pattern)
       setWinningCells(cells)
       autoClaimBingo(pattern!)
     } else if (!hasWin && hasBingo) {
       setHasBingo(false)
-      setWinningPattern(null)
       setBingoClaimed(false)
       setWinningCells([
         [false, false, false, false, false],
