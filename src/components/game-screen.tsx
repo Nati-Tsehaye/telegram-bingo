@@ -22,7 +22,7 @@ interface GameScreenProps {
 }
 
 export default function GameScreen({ room, onBack }: GameScreenProps) {
-  const { user } = useTelegram()
+  const { user, webApp } = useTelegram()
   const [selectedBoardNumber, setSelectedBoardNumber] = useState<number | null>(null)
   const [selectedBoard, setSelectedBoard] = useState<BingoBoard | null>(null)
   const [gameStatus, setGameStatus] = useState<"waiting" | "active" | "starting">("waiting")
@@ -40,14 +40,24 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   // Fetch current board selections
   const fetchBoardSelections = useCallback(async () => {
     try {
+      console.log("Fetching board selections for room:", room.id)
       const response = await fetch(`/api/board-selections?roomId=${room.id}`)
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
       const data = await response.json()
+      console.log("Fetched selections:", data)
 
       if (data.success) {
         setBoardSelections(data.selections)
+      } else {
+        console.error("Failed to fetch selections:", data.error)
       }
     } catch (error) {
       console.error("Failed to fetch board selections:", error)
+      // Don't show alert for fetch errors as they happen in background
     }
   }, [room.id])
 
@@ -65,10 +75,13 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   const handleNumberClick = async (number: number) => {
     if (isLoading) return
 
+    console.log("Clicking number:", number, "Current selection:", selectedBoardNumber)
+
     // If clicking the same number, deselect it
     if (selectedBoardNumber === number) {
       setIsLoading(true)
       try {
+        console.log("Deselecting number:", number)
         const response = await fetch("/api/board-selections", {
           method: "POST",
           headers: {
@@ -82,13 +95,20 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
           }),
         })
 
-        if (response.ok) {
+        const data = await response.json()
+        console.log("Deselect response:", data)
+
+        if (response.ok && data.success) {
           setSelectedBoardNumber(null)
           setSelectedBoard(null)
-          fetchBoardSelections()
+          await fetchBoardSelections()
+        } else {
+          console.error("Deselect failed:", data)
+          webApp?.showAlert(data.error || "Failed to deselect board")
         }
       } catch (error) {
         console.error("Failed to deselect board:", error)
+        webApp?.showAlert("Network error. Please check your connection.")
       } finally {
         setIsLoading(false)
       }
@@ -98,13 +118,15 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     // Check if number is already taken by another player
     const takenByOther = boardSelections.find((s) => s.boardNumber === number && s.playerId !== playerId)
     if (takenByOther) {
-      alert(`Board ${number} is already selected by ${takenByOther.playerName}`)
+      console.log("Number taken by:", takenByOther.playerName)
+      webApp?.showAlert(`Board ${number} is already selected by ${takenByOther.playerName}`)
       return
     }
 
     // Select new board number
     setIsLoading(true)
     try {
+      console.log("Selecting number:", number)
       const response = await fetch("/api/board-selections", {
         method: "POST",
         headers: {
@@ -120,18 +142,23 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       })
 
       const data = await response.json()
+      console.log("Select response:", data)
 
       if (data.success) {
         setSelectedBoardNumber(number)
         const board = getBoardById(number)
         setSelectedBoard(board || null)
-        fetchBoardSelections()
+        await fetchBoardSelections()
+
+        // Haptic feedback for successful selection
+        webApp?.HapticFeedback.impactOccurred("medium")
       } else {
-        alert(data.error || "Failed to select board")
+        console.error("Select failed:", data)
+        webApp?.showAlert(data.error || "Failed to select board")
       }
     } catch (error) {
       console.error("Failed to select board:", error)
-      alert("Failed to select board. Please try again.")
+      webApp?.showAlert("Network error. Please check your connection.")
     } finally {
       setIsLoading(false)
     }
@@ -223,13 +250,14 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
                   aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
                   ${
                     status.isMySelection
-                      ? "bg-green-500 shadow-lg transform scale-105"
+                      ? "bg-green-500 shadow-lg transform scale-105 ring-2 ring-green-300"
                       : status.isTakenByOther
-                        ? "bg-red-500 cursor-not-allowed opacity-75"
+                        ? "bg-red-500 cursor-not-allowed opacity-75 ring-2 ring-red-300"
                         : "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30"
                   }
-                  ${isLoading ? "opacity-50" : ""}
+                  ${isLoading ? "opacity-50 cursor-wait" : ""}
                   transition-all duration-300
+                  ${isLoading && selectedBoardNumber === number ? "animate-pulse" : ""}
                 `}
                 title={
                   status.isTakenByOther
@@ -239,7 +267,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
                       : "Available"
                 }
               >
-                {number}
+                {isLoading && selectedBoardNumber === number ? "..." : number}
               </button>
             )
           })}

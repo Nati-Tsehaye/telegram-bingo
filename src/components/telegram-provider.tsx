@@ -153,12 +153,27 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
           }
         }
 
+        // Add network status monitoring
+        const handleOnline = () => {
+          console.log("Network: Online")
+          tg.showAlert?.("Connection restored!")
+        }
+
+        const handleOffline = () => {
+          console.log("Network: Offline")
+          tg.showAlert?.("Connection lost. Please check your internet.")
+        }
+
+        window.addEventListener("online", handleOnline)
+        window.addEventListener("offline", handleOffline)
+
         setWebApp(tg)
         setUser(tg.initDataUnsafe?.user || null)
         setIsReady(true)
 
         // Handle viewport changes
         const handleViewportChanged = () => {
+          console.log("Viewport changed")
           // Force a re-render when viewport changes
           setIsReady((prev) => !prev)
           setTimeout(() => setIsReady(true), 0)
@@ -168,6 +183,8 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
 
         return () => {
           tg.offEvent?.("viewportChanged", handleViewportChanged)
+          window.removeEventListener("online", handleOnline)
+          window.removeEventListener("offline", handleOffline)
         }
       } else {
         // For development/testing outside Telegram
