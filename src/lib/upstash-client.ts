@@ -25,7 +25,13 @@ export class GameStateManager {
 
   static async getGameState(roomId: string) {
     const data = await redis.get(`game:${roomId}`)
-    return data ? JSON.parse(data as string) : null
+    if (!data) return null
+
+    // Handle both string and object responses
+    if (typeof data === "string") {
+      return JSON.parse(data)
+    }
+    return data // Already parsed by Upstash client
   }
 
   // Board selections management
@@ -67,27 +73,51 @@ export class GameStateManager {
     )
   }
 
-  // Room management
+  // Room management - Fixed JSON parsing
   static async setRoom(roomId: string, room: unknown) {
     await redis.setex(`room:${roomId}`, 7200, JSON.stringify(room)) // 2 hours TTL
   }
 
   static async getRoom(roomId: string) {
     const data = await redis.get(`room:${roomId}`)
-    return data ? JSON.parse(data as string) : null
+    if (!data) return null
+
+    // Handle both string and object responses
+    if (typeof data === "string") {
+      return JSON.parse(data)
+    }
+    return data // Already parsed by Upstash client
   }
 
   static async getAllRooms() {
-    const keys = await redis.keys("room:*")
-    if (keys.length === 0) return []
+    try {
+      const keys = await redis.keys("room:*")
+      if (keys.length === 0) return []
 
-    const rooms = await Promise.all(
-      keys.map(async (key) => {
-        const data = await redis.get(key)
-        return data ? JSON.parse(data as string) : null
-      }),
-    )
-    return rooms.filter(Boolean)
+      const rooms = await Promise.all(
+        keys.map(async (key) => {
+          try {
+            const data = await redis.get(key)
+            if (!data) return null
+
+            // Handle both string and object responses
+            if (typeof data === "string") {
+              return JSON.parse(data)
+            }
+            return data // Already parsed by Upstash client
+          } catch (error) {
+            console.error(`Error parsing room data for key ${key}:`, error)
+            // Delete corrupted data
+            await redis.del(key)
+            return null
+          }
+        }),
+      )
+      return rooms.filter(Boolean)
+    } catch (error) {
+      console.error("Error getting all rooms:", error)
+      return []
+    }
   }
 
   // Player session management
@@ -145,14 +175,46 @@ export class GameStateManager {
     return await redis.exists(key)
   }
 
-  // Cleanup expired data
+  // Cleanup expired data and corrupted entries
   static async cleanup() {
-    const expiredKeys = await redis.keys("game:*")
-    for (const key of expiredKeys) {
-      const ttl = await redis.ttl(key)
-      if (ttl <= 0) {
-        await redis.del(key)
+    try {
+      // Clean up expired game data
+      const gameKeys = await redis.keys("game:*")
+      for (const key of gameKeys) {
+        const ttl = await redis.ttl(key)
+        if (ttl <= 0) {
+          await redis.del(key)
+        }
       }
+
+      // Clean up corrupted room data
+      const roomKeys = await redis.keys("room:*")
+      for (const key of roomKeys) {
+        try {
+          const data = await redis.get(key)
+          if (data && typeof data === "string") {
+            JSON.parse(data) // Test if it's valid JSON
+          }
+        } catch (error) {
+          console.log(`Deleting corrupted room data: ${key}`)
+          await redis.del(key)
+        }
+      }
+    } catch (error) {
+      console.error("Error during cleanup:", error)
+    }
+  }
+
+  // Clear all data (for development/testing)
+  static async clearAllData() {
+    try {
+      const allKeys = await redis.keys("*")
+      if (allKeys.length > 0) {
+        await redis.del(...allKeys)
+      }
+      console.log(`Cleared ${allKeys.length} keys from Redis`)
+    } catch (error) {
+      console.error("Error clearing data:", error)
     }
   }
 }
