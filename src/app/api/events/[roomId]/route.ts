@@ -1,5 +1,5 @@
 import type { NextRequest } from "next/server"
-import Redis from "ioredis" // Declare Redis variable
+import Redis from "ioredis"
 
 export async function GET(request: NextRequest, { params }: { params: { roomId: string } }) {
   const { roomId } = params
@@ -30,7 +30,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
           // Use Redis SUBSCRIBE for real-time updates
           await subscriber.subscribe(`room:${roomId}`)
 
-          subscriber.on("message", (channel, message) => {
+          subscriber.on("message", (_channel, message) => {
             if (!isActive) return
 
             try {
