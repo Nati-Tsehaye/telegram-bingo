@@ -44,6 +44,8 @@ export class GameStateManager {
 
   static async getBoardSelections(roomId: string) {
     const selections = await redis.hgetall(`boards:${roomId}`)
+    if (!selections) return []
+
     return Object.entries(selections).map(([playerId, data]) => ({
       playerId,
       ...JSON.parse(data as string),
