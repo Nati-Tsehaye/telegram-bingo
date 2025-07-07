@@ -17,10 +17,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
       controller.enqueue(`data: ${JSON.stringify({ type: "connected", roomId })}\n\n`)
 
       // Subscribe to Redis pub/sub for this room
-      const subscriber = new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      })
+      const subscriber = new Redis(process.env.UPSTASH_REDIS_REST_URL!)
 
       let isActive = true
 
