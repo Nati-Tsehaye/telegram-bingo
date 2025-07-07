@@ -36,12 +36,12 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
             try {
               const data = JSON.parse(message)
               controller.enqueue(`data: ${JSON.stringify(data)}\n\n`)
-            } catch (_error) {
-              console.error("Error parsing message:", _error)
+            } catch {
+              console.error("Error parsing message")
             }
           })
-        } catch (_error) {
-          console.error("Subscription error:", _error)
+        } catch {
+          console.error("Subscription error")
         }
       }
 
@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
 
         try {
           controller.enqueue(`data: ${JSON.stringify({ type: "heartbeat", timestamp: Date.now() })}\n\n`)
-        } catch (_error) {
+        } catch {
           clearInterval(heartbeat)
           isActive = false
         }
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
         subscriber.disconnect()
         try {
           controller.close()
-        } catch (_error) {
+        } catch {
           // Stream already closed
         }
       })
