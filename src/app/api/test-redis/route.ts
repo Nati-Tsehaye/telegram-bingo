@@ -23,7 +23,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      message: "Redis connection working!",
+      message: "Redis connection workings!",
       testResult: result,
       timestamp: new Date().toISOString(),
     })
