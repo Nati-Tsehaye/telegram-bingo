@@ -107,7 +107,7 @@ export async function POST(request: Request) {
         }
 
         // Check if player is already in this room
-        const existingPlayer = room.players?.find((p: Player) => p.id === playerId)
+        const existingPlayer = room.players?.find((p) => p.id === playerId)
         if (existingPlayer) {
           return NextResponse.json({
             success: true,

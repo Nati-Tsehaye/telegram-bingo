@@ -17,7 +17,10 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
       controller.enqueue(`data: ${JSON.stringify({ type: "connected", roomId })}\n\n`)
 
       // Subscribe to Redis pub/sub for this room
-      const subscriber = new Redis(process.env.UPSTASH_REDIS_REST_URL!)
+      const subscriber = new Redis({
+        url: process.env.UPSTASH_REDIS_REST_URL!,
+        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
+      })
 
       let isActive = true
 
@@ -33,12 +36,12 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
             try {
               const data = JSON.parse(message)
               controller.enqueue(`data: ${JSON.stringify(data)}\n\n`)
-            } catch (error) {
-              console.error("Error parsing message:", error)
+            } catch (_error) {
+              console.error("Error parsing message:", _error)
             }
           })
-        } catch (error) {
-          console.error("Subscription error:", error)
+        } catch (_error) {
+          console.error("Subscription error:", _error)
         }
       }
 
@@ -53,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
 
         try {
           controller.enqueue(`data: ${JSON.stringify({ type: "heartbeat", timestamp: Date.now() })}\n\n`)
-        } catch (error) {
+        } catch (_error) {
           clearInterval(heartbeat)
           isActive = false
         }
@@ -66,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
         subscriber.disconnect()
         try {
           controller.close()
-        } catch (error) {
+        } catch (_error) {
           // Stream already closed
         }
       })
