@@ -1,5 +1,4 @@
 import type { NextRequest } from "next/server"
-import Redis from "ioredis"
 
 export async function GET(request: NextRequest, { params }: { params: Promise<{ roomId: string }> }) {
   const { roomId } = await params
@@ -16,38 +15,9 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       // Send initial connection message
       controller.enqueue(`data: ${JSON.stringify({ type: "connected", roomId })}\n\n`)
 
-      // Subscribe to Redis pub/sub for this room
-      const subscriber = new Redis({
-        url: process.env.UPSTASH_REDIS_REST_URL!,
-        token: process.env.UPSTASH_REDIS_REST_TOKEN!,
-      })
-
       let isActive = true
 
-      // Subscribe to room events
-      const subscribeToRoom = async () => {
-        try {
-          // Use Redis SUBSCRIBE for real-time updates
-          await subscriber.subscribe(`room:${roomId}`)
-
-          subscriber.on("message", (_channel, message) => {
-            if (!isActive) return
-
-            try {
-              const data = JSON.parse(message)
-              controller.enqueue(`data: ${JSON.stringify(data)}\n\n`)
-            } catch {
-              console.error("Error parsing message")
-            }
-          })
-        } catch {
-          console.error("Subscription error")
-        }
-      }
-
-      subscribeToRoom()
-
-      // Send periodic heartbeat
+      // Send periodic heartbeat to keep connection alive
       const heartbeat = setInterval(() => {
         if (!isActive) {
           clearInterval(heartbeat)
@@ -66,7 +36,6 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       request.signal.addEventListener("abort", () => {
         isActive = false
         clearInterval(heartbeat)
-        subscriber.disconnect()
         try {
           controller.close()
         } catch {
