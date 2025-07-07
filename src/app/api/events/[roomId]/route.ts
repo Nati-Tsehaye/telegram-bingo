@@ -1,8 +1,8 @@
 import type { NextRequest } from "next/server"
 import Redis from "ioredis"
 
-export async function GET(request: NextRequest, { params }: { params: { roomId: string } }) {
-  const { roomId } = params
+export async function GET(request: NextRequest, { params }: { params: Promise<{ roomId: string }> }) {
+  const { roomId } = await params
   const { searchParams } = new URL(request.url)
   const playerId = searchParams.get("playerId")
 
