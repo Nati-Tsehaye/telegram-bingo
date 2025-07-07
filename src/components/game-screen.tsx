@@ -45,6 +45,8 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       const response = await fetch(`/api/board-selections?roomId=${room.id}`)
 
       if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`HTTP error! status: ${response.status}, body: ${errorText}`)
         throw new Error(`HTTP error! status: ${response.status}`)
       }
 
@@ -52,15 +54,16 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       console.log("Fetched selections:", data)
 
       if (data.success) {
-        setBoardSelections(data.selections)
+        setBoardSelections(data.selections || [])
       } else {
         console.error("Failed to fetch selections:", data.error)
+        webApp?.showAlert(`Failed to fetch selections: ${data.error}`)
       }
     } catch (error) {
       console.error("Failed to fetch board selections:", error)
-      // Don't show alert for fetch errors as they happen in background
+      webApp?.showAlert(`Network error: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
-  }, [room.id])
+  }, [room.id, webApp])
 
   const { isConnected: _isConnected } = useRealtime(room.id, playerId)
 
@@ -117,20 +120,27 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
           }),
         })
 
+        if (!response.ok) {
+          const errorText = await response.text()
+          console.error(`HTTP error! status: ${response.status}, body: ${errorText}`)
+          throw new Error(`HTTP error! status: ${response.status}`)
+        }
+
         const data = await response.json()
         console.log("Deselect response:", data)
 
-        if (response.ok && data.success) {
+        if (data.success) {
           setSelectedBoardNumber(null)
           setSelectedBoard(null)
           await fetchBoardSelections()
+          webApp?.HapticFeedback.impactOccurred("light")
         } else {
           console.error("Deselect failed:", data)
           webApp?.showAlert(data.error || "Failed to deselect board")
         }
       } catch (error) {
         console.error("Failed to deselect board:", error)
-        webApp?.showAlert("Network error. Please check your connection.")
+        webApp?.showAlert(`Network error: ${error instanceof Error ? error.message : "Unknown error"}`)
       } finally {
         setIsLoading(false)
       }
@@ -163,6 +173,12 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
         }),
       })
 
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error(`HTTP error! status: ${response.status}, body: ${errorText}`)
+        throw new Error(`HTTP error! status: ${response.status}`)
+      }
+
       const data = await response.json()
       console.log("Select response:", data)
 
@@ -180,7 +196,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       }
     } catch (error) {
       console.error("Failed to select board:", error)
-      webApp?.showAlert("Network error. Please check your connection.")
+      webApp?.showAlert(`Network error: ${error instanceof Error ? error.message : "Unknown error"}`)
     } finally {
       setIsLoading(false)
     }
@@ -188,7 +204,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
   const handleStartGame = () => {
     if (!selectedBoard) {
-      alert("Please select a board number before starting the game!")
+      webApp?.showAlert("Please select a board number before starting the game!")
       return
     }
 

@@ -57,7 +57,11 @@ export async function GET(request: Request) {
   } catch (error) {
     console.error("Error fetching board selections:", error)
     return NextResponse.json(
-      { error: "Failed to fetch selections" },
+      {
+        success: false,
+        error: "Failed to fetch selections",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       {
         status: 500,
         headers: {
@@ -72,14 +76,36 @@ export async function GET(request: Request) {
 
 export async function POST(request: Request) {
   try {
-    const { roomId, playerId, playerName, boardNumber, action } = await request.json()
+    const body = await request.json()
+    const { roomId, playerId, playerName, boardNumber, action } = body
     const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
     console.log("POST board-selections:", { roomId, playerId, playerName, boardNumber, action })
 
+    // Validate required fields
     if (!roomId || !playerId) {
       return NextResponse.json(
-        { error: "Room ID and Player ID required" },
+        {
+          success: false,
+          error: "Room ID and Player ID are required",
+        },
+        {
+          status: 400,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+            "Access-Control-Allow-Headers": "Content-Type",
+          },
+        },
+      )
+    }
+
+    if (action === "select" && (!boardNumber || !playerName)) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Board number and player name are required for selection",
+        },
         {
           status: 400,
           headers: {
@@ -94,7 +120,13 @@ export async function POST(request: Request) {
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`boardaction:${clientIp}`, 20, 60)
     if (!canProceed) {
-      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Rate limit exceeded",
+        },
+        { status: 429 },
+      )
     }
 
     const selections = await GameStateManager.getBoardSelections(roomId)
@@ -106,6 +138,7 @@ export async function POST(request: Request) {
         console.log("Board already taken:", existingSelection)
         return NextResponse.json(
           {
+            success: false,
             error: `Board ${boardNumber} is already selected by ${existingSelection.playerName}`,
             takenBy: existingSelection.playerName,
           },
@@ -181,7 +214,10 @@ export async function POST(request: Request) {
     }
 
     return NextResponse.json(
-      { error: "Invalid action" },
+      {
+        success: false,
+        error: "Invalid action. Use 'select' or 'deselect'",
+      },
       {
         status: 400,
         headers: {
@@ -194,7 +230,11 @@ export async function POST(request: Request) {
   } catch (error) {
     console.error("Error handling board selection:", error)
     return NextResponse.json(
-      { error: "Failed to handle selection" },
+      {
+        success: false,
+        error: "Failed to handle selection",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
       {
         status: 500,
         headers: {
