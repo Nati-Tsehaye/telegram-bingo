@@ -56,7 +56,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
 
         try {
           controller.enqueue(`data: ${JSON.stringify({ type: "heartbeat", timestamp: Date.now() })}\n\n`)
-        } catch (error) {
+        } catch (_error) {
           clearInterval(heartbeat)
           isActive = false
         }
@@ -69,7 +69,7 @@ export async function GET(request: NextRequest, { params }: { params: { roomId: 
         subscriber.disconnect()
         try {
           controller.close()
-        } catch (error) {
+        } catch (_error) {
           // Stream already closed
         }
       })

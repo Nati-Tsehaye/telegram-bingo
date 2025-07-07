@@ -380,7 +380,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   }, [room.id, fetchGameState, startGame])
 
   // Add these imports at the top
-  const { isConnected } = useRealtime(room.id, playerId)
+  const { isConnected: _isConnected } = useRealtime(room.id, playerId)
 
   // Add event listener for game state updates
   useEffect(() => {

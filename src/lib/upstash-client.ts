@@ -8,7 +8,7 @@ export const redis = new Redis({
 // Game state management with Redis
 export class GameStateManager {
   // Store game state in Redis with TTL
-  static async setGameState(roomId: string, state: any) {
+  static async setGameState(roomId: string, state: unknown) {
     await redis.setex(`game:${roomId}`, 3600, JSON.stringify(state)) // 1 hour TTL
 
     // Publish update to subscribers
@@ -28,7 +28,7 @@ export class GameStateManager {
   }
 
   // Board selections management
-  static async setBoardSelection(roomId: string, playerId: string, selection: any) {
+  static async setBoardSelection(roomId: string, playerId: string, selection: unknown) {
     await redis.hset(`boards:${roomId}`, playerId, JSON.stringify(selection))
 
     // Publish board selection update
@@ -65,7 +65,7 @@ export class GameStateManager {
   }
 
   // Room management
-  static async setRoom(roomId: string, room: any) {
+  static async setRoom(roomId: string, room: unknown) {
     await redis.setex(`room:${roomId}`, 7200, JSON.stringify(room)) // 2 hours TTL
   }
 

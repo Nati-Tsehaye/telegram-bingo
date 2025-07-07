@@ -33,7 +33,7 @@ async function initializeRooms() {
 
 export async function GET(request: Request) {
   try {
-    const { searchParams } = new URL(request.url)
+    const { searchParams: _searchParams } = new URL(request.url)
     const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
     // Rate limiting

@@ -62,7 +62,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     }
   }, [room.id])
 
-  const { isConnected } = useRealtime(room.id, playerId)
+  const { isConnected: _isConnected } = useRealtime(room.id, playerId)
 
   // Add event listeners for real-time updates
   useEffect(() => {

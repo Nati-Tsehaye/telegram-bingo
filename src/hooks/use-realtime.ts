@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 
 interface RealtimeEvent {
   type: string
-  data?: any
+  data?: unknown
   timestamp?: string
 }
 
