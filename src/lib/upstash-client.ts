@@ -29,7 +29,7 @@ export class GameStateManager {
 
   // Board selections management
   static async setBoardSelection(roomId: string, playerId: string, selection: unknown) {
-    await redis.hset(`boards:${roomId}`, playerId, JSON.stringify(selection))
+    await redis.hset(`boards:${roomId}`, { [playerId]: JSON.stringify(selection) })
 
     // Publish board selection update
     await redis.publish(
