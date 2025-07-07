@@ -4,46 +4,64 @@ import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types
 
 // Initialize default rooms in Redis if they don't exist
 async function initializeRooms() {
-  const existingRooms = await GameStateManager.getAllRooms()
+  try {
+    console.log("🔍 Checking for existing rooms...")
+    const existingRooms = await GameStateManager.getAllRooms()
+    console.log("📊 Found existing rooms:", existingRooms.length)
 
-  if (existingRooms.length === 0) {
-    const stakes = [10, 20, 50, 100, 200, 500]
+    if (existingRooms.length === 0) {
+      console.log("🏗️ Creating default rooms...")
+      const stakes = [10, 20, 50, 100, 200, 500]
 
-    for (const stake of stakes) {
-      const roomId = `room-${stake}`
-      const room: GameRoom = {
-        id: roomId,
-        stake,
-        players: [],
-        maxPlayers: 100,
-        status: "waiting",
-        prize: 0,
-        createdAt: new Date(),
-        activeGames: 0,
-        hasBonus: true,
-        gameStartTime: undefined,
-        calledNumbers: [],
-        currentNumber: undefined,
+      for (const stake of stakes) {
+        const roomId = `room-${stake}`
+        const room: GameRoom = {
+          id: roomId,
+          stake,
+          players: [],
+          maxPlayers: 100,
+          status: "waiting",
+          prize: 0,
+          createdAt: new Date(),
+          activeGames: 0,
+          hasBonus: true,
+          gameStartTime: undefined,
+          calledNumbers: [],
+          currentNumber: undefined,
+        }
+
+        await GameStateManager.setRoom(roomId, room)
+        console.log(`✅ Created room: ${roomId}`)
       }
-
-      await GameStateManager.setRoom(roomId, room)
+      console.log("🎉 All default rooms created!")
+    } else {
+      console.log("✅ Using existing rooms")
     }
+  } catch (error) {
+    console.error("❌ Error initializing rooms:", error)
+    throw error
   }
 }
 
 export async function GET(request: Request) {
   try {
+    console.log("🚀 GET /api/rooms called")
     const { searchParams: _searchParams } = new URL(request.url)
     const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`rooms:${clientIp}`, 30, 60)
     if (!canProceed) {
+      console.log("⚠️ Rate limit exceeded for IP:", clientIp)
       return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
     }
 
+    console.log("🔧 Initializing rooms...")
     await initializeRooms()
+
+    console.log("📋 Fetching all rooms...")
     const rooms = await GameStateManager.getAllRooms()
+    console.log("📊 Total rooms found:", rooms.length)
 
     const roomSummaries: GameRoomSummary[] = rooms.map((room) => ({
       id: room.id,
@@ -62,6 +80,8 @@ export async function GET(request: Request) {
 
     const totalPlayers = rooms.reduce((sum, room) => sum + (room.players?.length || 0), 0)
 
+    console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalPlayers, "total players")
+
     return NextResponse.json({
       success: true,
       rooms: roomSummaries,
@@ -69,8 +89,15 @@ export async function GET(request: Request) {
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
-    console.error("Error fetching rooms:", error)
-    return NextResponse.json({ error: "Failed to fetch rooms" }, { status: 500 })
+    console.error("❌ Error in GET /api/rooms:", error)
+    return NextResponse.json(
+      {
+        error: "Failed to fetch rooms",
+        details: error instanceof Error ? error.message : "Unknown error",
+        debug: true,
+      },
+      { status: 500 },
+    )
   }
 }
 
@@ -78,6 +105,8 @@ export async function POST(request: Request) {
   try {
     const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
     const clientIp = request.headers.get("x-forwarded-for") || "unknown"
+
+    console.log("🚀 POST /api/rooms called with action:", action)
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
@@ -201,7 +230,13 @@ export async function POST(request: Request) {
         return NextResponse.json({ error: "Invalid action" }, { status: 400 })
     }
   } catch (error) {
-    console.error("Error handling room action:", error)
-    return NextResponse.json({ error: "Internal server error" }, { status: 500 })
+    console.error("❌ Error handling room action:", error)
+    return NextResponse.json(
+      {
+        error: "Internal server error",
+        details: error instanceof Error ? error.message : "Unknown error",
+      },
+      { status: 500 },
+    )
   }
 }
