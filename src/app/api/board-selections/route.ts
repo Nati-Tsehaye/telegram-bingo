@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server"
+import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 
 interface BoardSelection {
   roomId: string
@@ -8,13 +9,11 @@ interface BoardSelection {
   timestamp: string
 }
 
-// In-memory storage for board selections (replace with Redis/Database in production)
-const boardSelections = new Map<string, BoardSelection[]>() // roomId -> selections[]
-
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
     const roomId = searchParams.get("roomId")
+    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
     console.log("GET board-selections for room:", roomId)
 
@@ -32,7 +31,13 @@ export async function GET(request: Request) {
       )
     }
 
-    const selections = boardSelections.get(roomId) || []
+    // Rate limiting
+    const canProceed = await RateLimiter.checkLimit(`boards:${clientIp}`, 60, 60)
+    if (!canProceed) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+    }
+
+    const selections = await GameStateManager.getBoardSelections(roomId)
     console.log("Returning selections:", selections)
 
     return NextResponse.json(
@@ -68,6 +73,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { roomId, playerId, playerName, boardNumber, action } = await request.json()
+    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
     console.log("POST board-selections:", { roomId, playerId, playerName, boardNumber, action })
 
@@ -85,7 +91,13 @@ export async function POST(request: Request) {
       )
     }
 
-    let selections = boardSelections.get(roomId) || []
+    // Rate limiting
+    const canProceed = await RateLimiter.checkLimit(`boardaction:${clientIp}`, 20, 60)
+    if (!canProceed) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+    }
+
+    const selections = await GameStateManager.getBoardSelections(roomId)
 
     if (action === "select") {
       // Check if number is already taken by another player
@@ -109,7 +121,7 @@ export async function POST(request: Request) {
       }
 
       // Remove any previous selection by this player
-      selections = selections.filter((s) => s.playerId !== playerId)
+      await GameStateManager.removeBoardSelection(roomId, playerId)
 
       // Add new selection
       const newSelection: BoardSelection = {
@@ -120,17 +132,18 @@ export async function POST(request: Request) {
         timestamp: new Date().toISOString(),
       }
 
-      selections.push(newSelection)
-      boardSelections.set(roomId, selections)
+      await GameStateManager.setBoardSelection(roomId, playerId, newSelection)
 
       console.log("Board selected successfully:", newSelection)
+
+      const updatedSelections = await GameStateManager.getBoardSelections(roomId)
 
       return NextResponse.json(
         {
           success: true,
           message: `Board ${boardNumber} selected successfully`,
-          selections,
-          selectedNumbers: selections.map((s) => s.boardNumber),
+          selections: updatedSelections,
+          selectedNumbers: updatedSelections.map((s) => s.boardNumber),
         },
         {
           headers: {
@@ -144,18 +157,18 @@ export async function POST(request: Request) {
 
     if (action === "deselect") {
       // Remove selection by this player
-      const originalLength = selections.length
-      selections = selections.filter((s) => s.playerId !== playerId)
-      boardSelections.set(roomId, selections)
+      await GameStateManager.removeBoardSelection(roomId, playerId)
 
-      console.log("Board deselected:", { originalLength, newLength: selections.length })
+      console.log("Board deselected for player:", playerId)
+
+      const updatedSelections = await GameStateManager.getBoardSelections(roomId)
 
       return NextResponse.json(
         {
           success: true,
           message: "Selection removed",
-          selections,
-          selectedNumbers: selections.map((s) => s.boardNumber),
+          selections: updatedSelections,
+          selectedNumbers: updatedSelections.map((s) => s.boardNumber),
         },
         {
           headers: {

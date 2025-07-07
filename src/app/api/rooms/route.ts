@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server"
+import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
-// In-memory storage (replace with Redis/Database in production)
-const gameRooms = new Map<string, GameRoom>()
-const playerSessions = new Map<string, { roomId: string; lastActivity: number }>()
+// Initialize default rooms in Redis if they don't exist
+async function initializeRooms() {
+  const existingRooms = await GameStateManager.getAllRooms()
 
-// Initialize default rooms if empty
-function initializeRooms() {
-  if (gameRooms.size === 0) {
+  if (existingRooms.length === 0) {
     const stakes = [10, 20, 50, 100, 200, 500]
-    stakes.forEach((stake) => {
-      // Create only ONE room per stake, not 5
+
+    for (const stake of stakes) {
       const roomId = `room-${stake}`
-      gameRooms.set(roomId, {
+      const room: GameRoom = {
         id: roomId,
         stake,
         players: [],
-        maxPlayers: 100, // High capacity to handle many players
+        maxPlayers: 100,
         status: "waiting",
         prize: 0,
         createdAt: new Date(),
@@ -25,34 +24,48 @@ function initializeRooms() {
         gameStartTime: undefined,
         calledNumbers: [],
         currentNumber: undefined,
-      })
-    })
+      }
+
+      await GameStateManager.setRoom(roomId, room)
+    }
   }
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    initializeRooms()
+    const { searchParams } = new URL(request.url)
+    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
-    const rooms: GameRoomSummary[] = Array.from(gameRooms.values()).map((room) => ({
+    // Rate limiting
+    const canProceed = await RateLimiter.checkLimit(`rooms:${clientIp}`, 30, 60)
+    if (!canProceed) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+    }
+
+    await initializeRooms()
+    const rooms = await GameStateManager.getAllRooms()
+
+    const roomSummaries: GameRoomSummary[] = rooms.map((room) => ({
       id: room.id,
       stake: room.stake,
-      players: room.players.length, // Only send count, not full player data
+      players: room.players?.length || 0,
       maxPlayers: room.maxPlayers,
       status: room.status,
-      prize: room.players.length * room.stake,
-      createdAt: room.createdAt.toISOString(),
-      activeGames: room.activeGames,
+      prize: (room.players?.length || 0) * room.stake,
+      createdAt: room.createdAt,
+      activeGames: room.activeGames || 0,
       hasBonus: room.hasBonus,
-      gameStartTime: room.gameStartTime?.toISOString(),
-      calledNumbers: room.calledNumbers,
+      gameStartTime: room.gameStartTime,
+      calledNumbers: room.calledNumbers || [],
       currentNumber: room.currentNumber,
     }))
 
+    const totalPlayers = rooms.reduce((sum, room) => sum + (room.players?.length || 0), 0)
+
     return NextResponse.json({
       success: true,
-      rooms,
-      totalPlayers: Array.from(gameRooms.values()).reduce((sum, room) => sum + room.players.length, 0),
+      rooms: roomSummaries,
+      totalPlayers,
       timestamp: new Date().toISOString(),
     })
   } catch (error) {
@@ -64,8 +77,15 @@ export async function GET() {
 export async function POST(request: Request) {
   try {
     const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
+    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
 
-    initializeRooms()
+    // Rate limiting
+    const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
+    if (!canProceed) {
+      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+    }
+
+    await initializeRooms()
 
     switch (action) {
       case "join":
@@ -73,12 +93,12 @@ export async function POST(request: Request) {
           return NextResponse.json({ error: "Room ID required" }, { status: 400 })
         }
 
-        const room = gameRooms.get(roomId)
+        const room = await GameStateManager.getRoom(roomId)
         if (!room) {
           return NextResponse.json({ error: "Room not found" }, { status: 404 })
         }
 
-        if (room.players.length >= room.maxPlayers) {
+        if ((room.players?.length || 0) >= room.maxPlayers) {
           return NextResponse.json({ error: "Room is full" }, { status: 400 })
         }
 
@@ -87,7 +107,7 @@ export async function POST(request: Request) {
         }
 
         // Check if player is already in this room
-        const existingPlayer = room.players.find((p) => p.id === playerId)
+        const existingPlayer = room.players?.find((p) => p.id === playerId)
         if (existingPlayer) {
           return NextResponse.json({
             success: true,
@@ -97,9 +117,15 @@ export async function POST(request: Request) {
         }
 
         // Remove player from other rooms first
-        gameRooms.forEach((r) => {
-          r.players = r.players.filter((p: Player) => p.id !== playerId)
-        })
+        const currentRoomId = await GameStateManager.getPlayerSession(playerId)
+        if (currentRoomId && currentRoomId !== roomId) {
+          const currentRoom = await GameStateManager.getRoom(currentRoomId as string)
+          if (currentRoom) {
+            currentRoom.players = currentRoom.players?.filter((p: Player) => p.id !== playerId) || []
+            currentRoom.prize = (currentRoom.players?.length || 0) * currentRoom.stake
+            await GameStateManager.setRoom(currentRoomId as string, currentRoom)
+          }
+        }
 
         // Add player to new room
         const player: Player = {
@@ -109,29 +135,35 @@ export async function POST(request: Request) {
           joinedAt: new Date(),
         }
 
+        room.players = room.players || []
         room.players.push(player)
         room.prize = room.players.length * room.stake
 
-        // Auto-start if enough players (minimum 2, or when room gets busy)
+        // Auto-start logic
         const minPlayers = 2
-        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10) // Start with 10% or 10 players max
+        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10)
 
         if (room.players.length >= minPlayers && room.players.length >= autoStartThreshold) {
           room.status = "starting"
-          // Start game after 10 seconds
-          setTimeout(() => {
-            const currentRoom = gameRooms.get(roomId)
+
+          // Schedule game start
+          setTimeout(async () => {
+            const currentRoom = await GameStateManager.getRoom(roomId)
             if (currentRoom && currentRoom.status === "starting") {
               currentRoom.status = "active"
               currentRoom.gameStartTime = new Date()
               currentRoom.activeGames = 1
+              await GameStateManager.setRoom(roomId, currentRoom)
+
+              // Start auto number calling
+              await GameStateManager.scheduleNumberCalling(roomId)
             }
           }, 10000)
         }
 
-        playerSessions.set(playerId, { roomId, lastActivity: Date.now() })
+        await GameStateManager.setRoom(roomId, room)
+        await GameStateManager.setPlayerSession(playerId, roomId)
 
-        // Return the full room for joining player
         return NextResponse.json({
           success: true,
           room,
@@ -139,55 +171,30 @@ export async function POST(request: Request) {
         })
 
       case "leave":
-        gameRooms.forEach((room) => {
-          room.players = room.players.filter((p: Player) => p.id !== playerId)
-          room.prize = room.players.length * room.stake
+        const playerRoomId = await GameStateManager.getPlayerSession(playerId)
+        if (playerRoomId) {
+          const playerRoom = await GameStateManager.getRoom(playerRoomId as string)
+          if (playerRoom) {
+            playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
+            playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
 
-          // Reset room if empty
-          if (room.players.length === 0) {
-            room.status = "waiting"
-            room.activeGames = 0
-            room.calledNumbers = []
-            room.currentNumber = undefined
+            // Reset room if empty
+            if (playerRoom.players.length === 0) {
+              playerRoom.status = "waiting"
+              playerRoom.activeGames = 0
+              playerRoom.calledNumbers = []
+              playerRoom.currentNumber = undefined
+            }
+
+            await GameStateManager.setRoom(playerRoomId as string, playerRoom)
           }
-        })
+        }
 
-        playerSessions.delete(playerId)
+        await GameStateManager.removePlayerSession(playerId)
 
         return NextResponse.json({
           success: true,
           message: "Left room successfully",
-        })
-
-      case "ready":
-        const playerRoom = Array.from(gameRooms.values()).find((room) =>
-          room.players.some((p: Player) => p.id === playerId),
-        )
-
-        if (playerRoom) {
-          const player = playerRoom.players.find((p: Player) => p.id === playerId)
-          if (player) {
-            // Add isReady property if it doesn't exist
-            ;(player as Player & { isReady?: boolean }).isReady = true
-
-            // Check if all players are ready
-            const readyCount = playerRoom.players.filter((p: Player & { isReady?: boolean }) => p.isReady).length
-            if (readyCount >= 2 && readyCount === playerRoom.players.length) {
-              playerRoom.status = "starting"
-              setTimeout(() => {
-                if (playerRoom.status === "starting") {
-                  playerRoom.status = "active"
-                  playerRoom.gameStartTime = new Date()
-                  playerRoom.activeGames = 1
-                }
-              }, 5000)
-            }
-          }
-        }
-
-        return NextResponse.json({
-          success: true,
-          message: "Player ready",
         })
 
       default:

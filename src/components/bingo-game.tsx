@@ -8,6 +8,7 @@ import type { BingoBoard } from "@/data/bingo-boards"
 import type { GameRoom } from "@/types/game"
 import { useTelegram } from "@/components/telegram-provider"
 import BingoResultScreen from "./bingo-result-screen"
+import { useRealtime } from "@/hooks/use-realtime"
 
 interface GameState {
   roomId: string
@@ -281,40 +282,12 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       const data = await response.json()
 
       if (data.success) {
-        const newGameState = data.gameState
-
-        // Check if there's a new number called and play audio
-        if (
-          newGameState.currentNumber &&
-          newGameState.currentNumber !== gameState.currentNumber &&
-          newGameState.currentNumber !== lastPlayedNumber
-        ) {
-          console.log(`New number called: ${newGameState.currentNumber}`)
-          playNumberAudio(newGameState.currentNumber)
-          setLastPlayedNumber(newGameState.currentNumber)
-        }
-
-        // Update recent calls when current number changes
-        if (newGameState.currentNumber !== gameState.currentNumber && gameState.currentNumber !== null) {
-          setRecentCalls((prev) => {
-            const newRecent = [gameState.currentNumber!, ...prev]
-            return newRecent.slice(0, 4)
-          })
-        }
-
-        // Check if game finished and show result screen
-        if (newGameState.gameStatus === "finished" && gameState.gameStatus !== "finished") {
-          setTimeout(() => {
-            setShowResultScreen(true)
-          }, 2000)
-        }
-
-        setGameState(newGameState)
+        setGameState(data.gameState)
       }
     } catch (error) {
       console.error("Failed to fetch game state:", error)
     }
-  }, [room.id, gameState.currentNumber, gameState.gameStatus, lastPlayedNumber, playNumberAudio])
+  }, [room.id])
 
   // Start the game
   const startGame = useCallback(async () => {
@@ -406,10 +379,54 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     initGame()
   }, [room.id, fetchGameState, startGame])
 
-  // Poll for game state updates every 2 seconds
+  // Add these imports at the top
+  const { isConnected } = useRealtime(room.id, playerId)
+
+  // Add event listener for game state updates
   useEffect(() => {
-    const interval = setInterval(fetchGameState, 2000)
-    return () => clearInterval(interval)
+    const handleGameStateUpdate = (event: CustomEvent) => {
+      const newGameState = event.detail
+      console.log("Game state update received:", newGameState)
+
+      // Check if there's a new number called and play audio
+      if (
+        newGameState.currentNumber &&
+        newGameState.currentNumber !== gameState.currentNumber &&
+        newGameState.currentNumber !== lastPlayedNumber
+      ) {
+        console.log(`New number called: ${newGameState.currentNumber}`)
+        playNumberAudio(newGameState.currentNumber)
+        setLastPlayedNumber(newGameState.currentNumber)
+      }
+
+      // Update recent calls when current number changes
+      if (newGameState.currentNumber !== gameState.currentNumber && gameState.currentNumber !== null) {
+        setRecentCalls((prev) => {
+          const newRecent = [gameState.currentNumber!, ...prev]
+          return newRecent.slice(0, 4)
+        })
+      }
+
+      // Check if game finished and show result screen
+      if (newGameState.gameStatus === "finished" && gameState.gameStatus !== "finished") {
+        setTimeout(() => {
+          setShowResultScreen(true)
+        }, 2000)
+      }
+
+      setGameState(newGameState)
+    }
+
+    window.addEventListener("gameStateUpdate", handleGameStateUpdate as EventListener)
+
+    return () => {
+      window.removeEventListener("gameStateUpdate", handleGameStateUpdate as EventListener)
+    }
+  }, [gameState.currentNumber, gameState.gameStatus, lastPlayedNumber, playNumberAudio])
+
+  // Replace the polling interval with initial fetch only
+  useEffect(() => {
+    fetchGameState()
   }, [fetchGameState])
 
   // Auto-mark called numbers on player's board and check for wins

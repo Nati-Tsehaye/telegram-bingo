@@ -7,6 +7,7 @@ import BingoGame from "./bingo-game"
 import { getBoardById, type BingoBoard } from "@/data/bingo-boards"
 import { useTelegram } from "@/components/telegram-provider"
 import type { GameRoom } from "@/types/game"
+import { useRealtime } from "@/hooks/use-realtime"
 
 interface BoardSelection {
   roomId: string
@@ -61,11 +62,32 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     }
   }, [room.id])
 
-  // Load selections on mount and refresh every 3 seconds
+  const { isConnected } = useRealtime(room.id, playerId)
+
+  // Add event listeners for real-time updates
+  useEffect(() => {
+    const handleBoardSelectionUpdate = (event: CustomEvent) => {
+      console.log("Board selection update:", event.detail)
+      fetchBoardSelections() // Refresh selections
+    }
+
+    const handleBoardDeselectionUpdate = (event: CustomEvent) => {
+      console.log("Board deselection update:", event.detail)
+      fetchBoardSelections() // Refresh selections
+    }
+
+    window.addEventListener("boardSelectionUpdate", handleBoardSelectionUpdate as EventListener)
+    window.addEventListener("boardDeselectionUpdate", handleBoardDeselectionUpdate as EventListener)
+
+    return () => {
+      window.removeEventListener("boardSelectionUpdate", handleBoardSelectionUpdate as EventListener)
+      window.removeEventListener("boardDeselectionUpdate", handleBoardDeselectionUpdate as EventListener)
+    }
+  }, [fetchBoardSelections])
+
+  // Remove the polling interval and replace with initial fetch only
   useEffect(() => {
     fetchBoardSelections()
-    const interval = setInterval(fetchBoardSelections, 3000)
-    return () => clearInterval(interval)
   }, [fetchBoardSelections])
 
   const handleRefresh = () => {
