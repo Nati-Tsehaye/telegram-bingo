@@ -8,7 +8,7 @@ import GameScreen from "@/components/game-screen"
 import { useTelegram } from "@/components/telegram-provider"
 import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
-function Homepage() {
+export default function Homepage() {
   const { webApp, user, isReady } = useTelegram()
   const [activeTab, setActiveTab] = useState("Stake")
   const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
@@ -61,12 +61,6 @@ function Homepage() {
         setTotalPlayers(data.totalPlayers)
         setLastUpdate(new Date())
         console.log(`✅ Loaded ${data.rooms.length} rooms with ${data.totalPlayers} total players`)
-
-        // Show fallback message if using fallback data
-        if ("fallback" in data && data.fallback) {
-          console.warn("⚠️ Using fallback room data")
-          webApp?.showAlert("Using backup room data. Some features may be limited.")
-        }
       } else {
         throw new Error("API returned success: false")
       }
@@ -74,46 +68,7 @@ function Homepage() {
       console.error("❌ Failed to fetch rooms:", error)
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
       setError(errorMessage)
-
-      // Don't show alert in Telegram if it's a network error - just log it
-      if (webApp && !errorMessage.includes("HTTP 500")) {
-        webApp.showAlert(`Failed to load rooms: ${errorMessage}`)
-      }
-
-      // Set fallback rooms if fetch completely fails
-      const fallbackRooms: GameRoomSummary[] = [
-        {
-          id: "room-fallback-10",
-          stake: 10,
-          players: 0,
-          maxPlayers: 100,
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date().toISOString(),
-          activeGames: 0,
-          hasBonus: true,
-          calledNumbers: [],
-          currentNumber: undefined,
-        },
-        {
-          id: "room-fallback-20",
-          stake: 20,
-          players: 0,
-          maxPlayers: 100,
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date().toISOString(),
-          activeGames: 0,
-          hasBonus: true,
-          calledNumbers: [],
-          currentNumber: undefined,
-        },
-      ]
-
-      setGameRooms(fallbackRooms)
-      setTotalPlayers(0)
-      setLastUpdate(new Date())
-      console.log("🆘 Using client-side fallback rooms")
+      webApp?.showAlert(`Failed to load rooms: ${errorMessage}`)
     } finally {
       setIsLoading(false)
     }
@@ -140,13 +95,28 @@ function Homepage() {
     setConnectingRoomId(room.id)
 
     try {
-      const playerId = user?.id?.toString() || `guest-${Date.now()}`
+      // Generate more robust player ID for Telegram environment
+      const playerId = user?.id?.toString() || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+
+      // Create robust player name with multiple fallbacks
+      const playerName = (() => {
+        if (user?.first_name && user.first_name.trim()) {
+          return user.first_name.trim()
+        }
+        if (user?.username && user.username.trim()) {
+          return user.username.trim()
+        }
+        if (user?.id) {
+          return `Player ${user.id.toString().slice(-4)}`
+        }
+        return `Guest ${Date.now().toString().slice(-4)}`
+      })()
 
       // Use absolute URL for Telegram Mini App
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
       const url = `${baseUrl}/api/rooms`
 
-      console.log("🎮 Joining room:", room.id, "Player:", playerId)
+      console.log("🎮 Joining room:", room.id, "Player:", { id: playerId, name: playerName, telegramId: user?.id })
 
       const response = await fetch(url, {
         method: "POST",
@@ -159,11 +129,17 @@ function Homepage() {
           roomId: room.id,
           playerId,
           playerData: {
-            name: user?.first_name || "Guest Player",
+            name: playerName,
             telegramId: user?.id,
           },
         }),
       })
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("❌ HTTP Error:", response.status, errorText)
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
 
       const data = await response.json()
 
@@ -175,16 +151,20 @@ function Homepage() {
         webApp?.BackButton.show()
         webApp?.BackButton.onClick(async () => {
           // Leave room when going back
-          await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              action: "leave",
-              playerId,
-            }),
-          })
+          try {
+            await fetch(url, {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                action: "leave",
+                playerId,
+              }),
+            })
+          } catch (error) {
+            console.error("Error leaving room:", error)
+          }
 
           setCurrentScreen("lobby")
           setSelectedRoom(null)
@@ -192,11 +172,13 @@ function Homepage() {
           fetchRooms()
         })
       } else {
+        console.error("❌ Join failed:", data)
         webApp?.showAlert(data.error || "Failed to join room")
       }
     } catch (error) {
-      console.error("Failed to join room:", error)
-      webApp?.showAlert("Failed to join room. Please try again.")
+      console.error("❌ Failed to join room:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      webApp?.showAlert(`Failed to join room: ${errorMessage}`)
     } finally {
       setConnectingRoomId(null)
     }
@@ -432,5 +414,3 @@ function Homepage() {
     </div>
   )
 }
-
-export default Homepage

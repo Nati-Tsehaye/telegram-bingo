@@ -181,44 +181,85 @@ export class GameStateManager {
     try {
       console.log(`🏠 Setting room ${roomId}...`)
 
-      // Validate required fields
-      if (!room.id || !room.stake || typeof room.stake !== "number") {
-        throw new Error(`Invalid room data: missing id or stake`)
+      // Validate required fields with better defaults
+      if (!room.id && !roomId) {
+        throw new Error(`Invalid room data: missing room ID`)
       }
 
-      // Ensure the room object is properly serializable - convert to plain object
+      if (!room.stake || typeof room.stake !== "number" || room.stake <= 0) {
+        throw new Error(`Invalid room data: invalid stake value`)
+      }
+
+      // Ensure the room object is properly serializable with safe defaults
       const roomData = {
         id: String(room.id || roomId),
         stake: Number(room.stake || 0),
         players: Array.isArray(room.players)
-          ? room.players.map((player) => ({
-              id: String(player.id),
-              name: String(player.name || "Guest"),
-              telegramId: player.telegramId ? Number(player.telegramId) : undefined,
-              avatar: player.avatar ? String(player.avatar) : undefined,
-              joinedAt:
-                player.joinedAt instanceof Date
-                  ? player.joinedAt.toISOString()
-                  : String(player.joinedAt || new Date().toISOString()),
-            }))
+          ? room.players.map((player) => {
+              // More robust player data handling for Telegram environment
+              const playerId = String(player.id || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
+              const playerName = String(player.name || player.telegramId || "Guest Player").trim()
+
+              return {
+                id: playerId,
+                name: playerName || "Guest Player", // Ensure name is never empty
+                telegramId:
+                  player.telegramId && !isNaN(Number(player.telegramId)) ? Number(player.telegramId) : undefined,
+                avatar: player.avatar && typeof player.avatar === "string" ? String(player.avatar).trim() : undefined,
+                joinedAt: (() => {
+                  try {
+                    if (player.joinedAt instanceof Date) {
+                      return player.joinedAt.toISOString()
+                    } else if (typeof player.joinedAt === "string" && player.joinedAt) {
+                      return new Date(player.joinedAt).toISOString()
+                    } else {
+                      return new Date().toISOString()
+                    }
+                  } catch {
+                    return new Date().toISOString()
+                  }
+                })(),
+              }
+            })
           : [],
-        maxPlayers: Number(room.maxPlayers || 100),
-        status: String(room.status || "waiting"),
-        prize: Number(room.prize || 0),
-        activeGames: Number(room.activeGames || 0),
+        maxPlayers: Math.max(1, Number(room.maxPlayers || 100)),
+        status: ["waiting", "starting", "active", "finished"].includes(String(room.status))
+          ? String(room.status)
+          : "waiting",
+        prize: Math.max(0, Number(room.prize || 0)),
+        activeGames: Math.max(0, Number(room.activeGames || 0)),
         hasBonus: Boolean(room.hasBonus !== false),
-        createdAt:
-          room.createdAt instanceof Date
-            ? room.createdAt.toISOString()
-            : String(room.createdAt || new Date().toISOString()),
-        gameStartTime:
-          room.gameStartTime instanceof Date
-            ? room.gameStartTime.toISOString()
-            : room.gameStartTime
-              ? String(room.gameStartTime)
-              : undefined,
-        calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers.map((n) => Number(n)) : [],
-        currentNumber: room.currentNumber ? Number(room.currentNumber) : undefined,
+        createdAt: (() => {
+          try {
+            if (room.createdAt instanceof Date) {
+              return room.createdAt.toISOString()
+            } else if (typeof room.createdAt === "string" && room.createdAt) {
+              return new Date(room.createdAt).toISOString()
+            } else {
+              return new Date().toISOString()
+            }
+          } catch {
+            return new Date().toISOString()
+          }
+        })(),
+        gameStartTime: (() => {
+          try {
+            if (room.gameStartTime instanceof Date) {
+              return room.gameStartTime.toISOString()
+            } else if (typeof room.gameStartTime === "string" && room.gameStartTime) {
+              return new Date(room.gameStartTime).toISOString()
+            } else {
+              return undefined
+            }
+          } catch {
+            return undefined
+          }
+        })(),
+        calledNumbers: Array.isArray(room.calledNumbers)
+          ? room.calledNumbers.filter((n) => !isNaN(Number(n))).map((n) => Number(n))
+          : [],
+        currentNumber:
+          room.currentNumber && !isNaN(Number(room.currentNumber)) ? Number(room.currentNumber) : undefined,
       }
 
       console.log(`📝 Room data prepared for ${roomId}:`, {
@@ -226,62 +267,36 @@ export class GameStateManager {
         stake: roomData.stake,
         playersCount: roomData.players.length,
         status: roomData.status,
+        validPlayers: roomData.players.every((p) => p.id && p.name),
       })
+
+      // Validate final room data
+      if (!roomData.id || !roomData.stake || roomData.stake <= 0) {
+        throw new Error(`Invalid processed room data: id=${roomData.id}, stake=${roomData.stake}`)
+      }
+
+      // Test Redis connection before attempting to set
+      const connectionTest = await this.testConnection()
+      if (!connectionTest) {
+        throw new Error("Redis connection test failed")
+      }
 
       // Use setex with string serialization to avoid type issues
       const serializedRoom = JSON.stringify(roomData)
       console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
 
-      // Check if serialized data is too large (Redis has limits)
-      if (serializedRoom.length > 1000000) {
-        // 1MB limit
-        throw new Error(`Room data too large: ${serializedRoom.length} characters`)
-      }
-
-      // Try multiple approaches for setting the data
+      // Validate JSON serialization
       try {
-        // First try with setex
-        await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
-        console.log(`✅ Successfully set room ${roomId} with setex`)
-      } catch (setexError) {
-        console.warn(`⚠️ setex failed for room ${roomId}, trying set:`, setexError)
-
-        try {
-          // Fallback to regular set with separate expire
-          await redis.set(`room:${roomId}`, serializedRoom)
-          await redis.expire(`room:${roomId}`, 7200)
-          console.log(`✅ Successfully set room ${roomId} with set+expire`)
-        } catch (setError) {
-          console.error(`❌ Both setex and set failed for room ${roomId}:`, setError)
-
-          // Last resort: try with minimal data
-          const minimalRoomData = {
-            id: roomData.id,
-            stake: roomData.stake,
-            players: [],
-            maxPlayers: roomData.maxPlayers,
-            status: roomData.status,
-            prize: 0,
-            createdAt: roomData.createdAt,
-            activeGames: 0,
-            hasBonus: true,
-          }
-
-          const minimalSerialized = JSON.stringify(minimalRoomData)
-          await redis.setex(`room:${roomId}`, 7200, minimalSerialized)
-          console.log(`✅ Successfully set minimal room ${roomId}`)
-        }
+        JSON.parse(serializedRoom) // Test if it can be parsed back
+      } catch (error) {
+        throw new Error(`Room data serialization failed: ${error instanceof Error ? error.message : "Unknown error"}`)
       }
+
+      await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
+      console.log(`✅ Successfully set room ${roomId}`)
     } catch (error) {
       console.error(`❌ Error setting room ${roomId}:`, error)
       console.error(`Room data:`, JSON.stringify(room, null, 2))
-
-      // Don't throw the error in production, just log it
-      if (process.env.NODE_ENV === "production") {
-        console.error(`Production: Failed to set room ${roomId}, but continuing...`)
-        return // Don't throw in production
-      }
-
       throw new Error(`Failed to set room: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }

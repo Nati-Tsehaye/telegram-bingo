@@ -33,7 +33,6 @@ async function initializeRooms() {
     console.log("🏗️ Creating default rooms...")
     const stakes = [10, 20, 50, 100, 200, 500]
 
-    // Create rooms sequentially to avoid overwhelming Redis
     for (const stake of stakes) {
       const roomId = `room-${stake}`
 
@@ -44,11 +43,11 @@ async function initializeRooms() {
         continue
       }
 
-      // Create minimal room object to avoid serialization issues
+      // Create room with more robust data structure
       const room: GameRoom = {
         id: roomId,
-        stake,
-        players: [],
+        stake: stake,
+        players: [], // Start with empty array
         maxPlayers: 100,
         status: "waiting",
         prize: 0,
@@ -58,16 +57,36 @@ async function initializeRooms() {
       }
 
       try {
-        console.log(`Creating room: ${roomId}`)
+        console.log(`Creating room: ${roomId} with stake: ${stake}`)
+
+        // Validate room data before setting
+        if (!room.id || !room.stake || room.stake <= 0) {
+          throw new Error(`Invalid room data: id=${room.id}, stake=${room.stake}`)
+        }
+
         await GameStateManager.setRoom(roomId, room)
         console.log(`✅ Created room: ${roomId}`)
-
-        // Add small delay between room creations to avoid overwhelming Redis
-        await new Promise((resolve) => setTimeout(resolve, 100))
       } catch (error) {
         console.error(`❌ Failed to create room ${roomId}:`, error)
         // Don't throw here, continue with other rooms
-        // We'll create a fallback room later if needed
+        // But create a minimal fallback room
+        try {
+          const fallbackRoom: GameRoom = {
+            id: `${roomId}-fallback`,
+            stake: stake,
+            players: [],
+            maxPlayers: 100,
+            status: "waiting",
+            prize: 0,
+            createdAt: new Date(),
+            activeGames: 0,
+            hasBonus: true,
+          }
+          await GameStateManager.setRoom(`${roomId}-fallback`, fallbackRoom)
+          console.log(`✅ Created fallback room: ${roomId}-fallback`)
+        } catch (fallbackError) {
+          console.error(`❌ Failed to create fallback room:`, fallbackError)
+        }
       }
     }
     console.log("🎉 Room creation process completed!")
@@ -115,10 +134,10 @@ export async function GET(request: Request) {
     }
 
     console.log("📋 Fetching all rooms...")
-    let rooms = await GameStateManager.getAllRooms()
+    const rooms = await GameStateManager.getAllRooms()
     console.log("📊 Total rooms found:", rooms.length)
 
-    // If no rooms exist, create a minimal emergency room
+    // If no rooms exist, create a minimal fallback room
     if (rooms.length === 0) {
       console.log("🆘 No rooms found, creating emergency fallback room...")
       try {
@@ -133,53 +152,19 @@ export async function GET(request: Request) {
           activeGames: 0,
           hasBonus: true,
         }
-
-        // Try to create the fallback room
         await GameStateManager.setRoom("room-emergency-10", fallbackRoom)
-        rooms = [fallbackRoom]
+        rooms.push(fallbackRoom)
         console.log("✅ Created emergency fallback room")
       } catch (error) {
         console.error("❌ Failed to create emergency room:", error)
-
-        // Return a hardcoded room list as last resort
-        const hardcodedRooms: GameRoomSummary[] = [
-          {
-            id: "room-10",
-            stake: 10,
-            players: 0,
-            maxPlayers: 100,
-            status: "waiting",
-            prize: 0,
-            createdAt: new Date().toISOString(),
-            activeGames: 0,
-            hasBonus: true,
-            calledNumbers: [],
-            currentNumber: undefined,
-          },
-          {
-            id: "room-20",
-            stake: 20,
-            players: 0,
-            maxPlayers: 100,
-            status: "waiting",
-            prize: 0,
-            createdAt: new Date().toISOString(),
-            activeGames: 0,
-            hasBonus: true,
-            calledNumbers: [],
-            currentNumber: undefined,
-          },
-        ]
-
-        console.log("🆘 Using hardcoded fallback rooms")
+        // Return empty rooms list instead of failing
         return NextResponse.json(
           {
             success: true,
-            rooms: hardcodedRooms,
+            rooms: [],
             totalPlayers: 0,
             timestamp: new Date().toISOString(),
-            fallback: true,
-            message: "Using fallback rooms due to Redis issues",
+            message: "No rooms available, please try again later",
           },
           {
             headers: corsHeaders,
@@ -228,36 +213,15 @@ export async function GET(request: Request) {
     )
   } catch (error) {
     console.error("❌ Error in GET /api/rooms:", error)
-
-    // Return a minimal fallback response instead of failing completely
-    const fallbackRooms: GameRoomSummary[] = [
-      {
-        id: "room-fallback-10",
-        stake: 10,
-        players: 0,
-        maxPlayers: 100,
-        status: "waiting",
-        prize: 0,
-        createdAt: new Date().toISOString(),
-        activeGames: 0,
-        hasBonus: true,
-        calledNumbers: [],
-        currentNumber: undefined,
-      },
-    ]
-
     return NextResponse.json(
       {
-        success: true,
-        rooms: fallbackRooms,
-        totalPlayers: 0,
-        timestamp: new Date().toISOString(),
-        fallback: true,
-        error: error instanceof Error ? error.message : "Unknown error",
-        message: "Using fallback data due to server issues",
+        success: false,
+        error: "Failed to fetch rooms",
+        details: error instanceof Error ? error.message : "Unknown error",
+        debug: true,
       },
       {
-        status: 200, // Return 200 instead of 500 to avoid breaking the UI
+        status: 500,
         headers: corsHeaders,
       },
     )
@@ -369,13 +333,34 @@ export async function POST(request: Request) {
           }
         }
 
-        // Add player to new room
+        // Create player with robust data handling for Telegram environment
         const player: Player = {
-          id: playerId,
-          name: playerData?.name || "Guest Player",
-          telegramId: playerData?.telegramId,
+          id: playerId || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+          name: (playerData?.name || `Player ${Date.now().toString().slice(-4)}`).trim() || "Guest Player",
+          telegramId:
+            playerData?.telegramId && !isNaN(Number(playerData.telegramId)) ? Number(playerData.telegramId) : undefined,
           joinedAt: new Date(),
         }
+
+        // Validate player data
+        if (!player.id || !player.name) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Invalid player data",
+            },
+            {
+              status: 400,
+              headers: corsHeaders,
+            },
+          )
+        }
+
+        console.log(`Adding player to room ${roomId}:`, {
+          id: player.id,
+          name: player.name,
+          telegramId: player.telegramId,
+        })
 
         room.players = room.players || []
         room.players.push(player)
@@ -390,32 +375,51 @@ export async function POST(request: Request) {
 
           // Schedule game start
           setTimeout(async () => {
-            const currentRoom = await GameStateManager.getRoom(roomId)
-            if (currentRoom && currentRoom.status === "starting") {
-              currentRoom.status = "active"
-              currentRoom.gameStartTime = new Date()
-              currentRoom.activeGames = 1
-              await GameStateManager.setRoom(roomId, currentRoom)
+            try {
+              const currentRoom = await GameStateManager.getRoom(roomId)
+              if (currentRoom && currentRoom.status === "starting") {
+                currentRoom.status = "active"
+                currentRoom.gameStartTime = new Date()
+                currentRoom.activeGames = 1
+                await GameStateManager.setRoom(roomId, currentRoom)
 
-              // Start auto number calling
-              await GameStateManager.scheduleNumberCalling(roomId)
+                // Start auto number calling
+                await GameStateManager.scheduleNumberCalling(roomId)
+              }
+            } catch (error) {
+              console.error(`Error auto-starting game for room ${roomId}:`, error)
             }
           }, 10000)
         }
 
-        await GameStateManager.setRoom(roomId, room)
-        await GameStateManager.setPlayerSession(playerId, roomId)
+        try {
+          await GameStateManager.setRoom(roomId, room)
+          await GameStateManager.setPlayerSession(playerId, roomId)
 
-        return NextResponse.json(
-          {
-            success: true,
-            room,
-            message: "Joined room successfully",
-          },
-          {
-            headers: corsHeaders,
-          },
-        )
+          return NextResponse.json(
+            {
+              success: true,
+              room,
+              message: "Joined room successfully",
+            },
+            {
+              headers: corsHeaders,
+            },
+          )
+        } catch (error) {
+          console.error(`Error saving room after player join:`, error)
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Failed to join room due to server error",
+              details: error instanceof Error ? error.message : "Unknown error",
+            },
+            {
+              status: 500,
+              headers: corsHeaders,
+            },
+          )
+        }
 
       case "leave":
         const playerRoomId = await GameStateManager.getPlayerSession(playerId)
