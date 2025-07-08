@@ -14,6 +14,13 @@ const corsHeaders = {
 async function initializeRooms() {
   try {
     console.log("🔍 Checking for existing rooms...")
+
+    // First test Redis connection
+    const isConnected = await GameStateManager.testConnection()
+    if (!isConnected) {
+      throw new Error("Redis connection failed")
+    }
+
     const existingRooms = await GameStateManager.getAllRooms()
     console.log("📊 Found existing rooms:", existingRooms.length)
 
@@ -38,8 +45,15 @@ async function initializeRooms() {
           currentNumber: undefined,
         }
 
-        await GameStateManager.setRoom(roomId, room)
-        console.log(`✅ Created room: ${roomId}`)
+        try {
+          await GameStateManager.setRoom(roomId, room)
+          console.log(`✅ Created room: ${roomId}`)
+        } catch (error) {
+          console.error(`❌ Failed to create room ${roomId}:`, error)
+          throw new Error(
+            `Failed to create room ${roomId}: ${error instanceof Error ? error.message : "Unknown error"}`,
+          )
+        }
       }
       console.log("🎉 All default rooms created!")
     } else {
@@ -62,20 +76,16 @@ export async function GET(request: Request) {
   try {
     console.log("🚀 GET /api/rooms called")
     const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-    const userAgent = request.headers.get("user-agent") || "unknown"
-
-    console.log("📡 Request details:", {
-      ip: clientIp,
-      userAgent: userAgent.substring(0, 100),
-      headers: Object.fromEntries(request.headers.entries()),
-    })
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`rooms:${clientIp}`, 30, 60)
     if (!canProceed) {
       console.log("⚠️ Rate limit exceeded for IP:", clientIp)
       return NextResponse.json(
-        { error: "Rate limit exceeded" },
+        {
+          success: false,
+          error: "Rate limit exceeded",
+        },
         {
           status: 429,
           headers: corsHeaders,
@@ -148,7 +158,10 @@ export async function POST(request: Request) {
     const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
     if (!canProceed) {
       return NextResponse.json(
-        { error: "Rate limit exceeded" },
+        {
+          success: false,
+          error: "Rate limit exceeded",
+        },
         {
           status: 429,
           headers: corsHeaders,
@@ -162,7 +175,10 @@ export async function POST(request: Request) {
       case "join":
         if (!roomId) {
           return NextResponse.json(
-            { error: "Room ID required" },
+            {
+              success: false,
+              error: "Room ID required",
+            },
             {
               status: 400,
               headers: corsHeaders,
@@ -173,7 +189,10 @@ export async function POST(request: Request) {
         const room = await GameStateManager.getRoom(roomId)
         if (!room) {
           return NextResponse.json(
-            { error: "Room not found" },
+            {
+              success: false,
+              error: "Room not found",
+            },
             {
               status: 404,
               headers: corsHeaders,
@@ -183,7 +202,10 @@ export async function POST(request: Request) {
 
         if ((room.players?.length || 0) >= room.maxPlayers) {
           return NextResponse.json(
-            { error: "Room is full" },
+            {
+              success: false,
+              error: "Room is full",
+            },
             {
               status: 400,
               headers: corsHeaders,
@@ -193,7 +215,10 @@ export async function POST(request: Request) {
 
         if (room.status !== "waiting") {
           return NextResponse.json(
-            { error: "Game already started" },
+            {
+              success: false,
+              error: "Game already started",
+            },
             {
               status: 400,
               headers: corsHeaders,
@@ -309,7 +334,10 @@ export async function POST(request: Request) {
 
       default:
         return NextResponse.json(
-          { error: "Invalid action" },
+          {
+            success: false,
+            error: "Invalid action",
+          },
           {
             status: 400,
             headers: corsHeaders,

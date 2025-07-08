@@ -5,6 +5,29 @@ export async function GET() {
   try {
     console.log("🧪 Testing Redis connection...")
 
+    // Check environment variables first
+    const hasUrl = !!process.env.UPSTASH_REDIS_REST_URL || !!process.env.KV_REST_API_URL
+    const hasToken = !!process.env.UPSTASH_REDIS_REST_TOKEN || !!process.env.KV_REST_API_TOKEN
+
+    console.log("Environment check:", { hasUrl, hasToken })
+
+    if (!hasUrl || !hasToken) {
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Missing Redis environment variables",
+          details: {
+            hasUrl,
+            hasToken,
+            availableEnvVars: Object.keys(process.env).filter(
+              (key) => key.includes("REDIS") || key.includes("KV") || key.includes("UPSTASH"),
+            ),
+          },
+        },
+        { status: 500 },
+      )
+    }
+
     // Test basic Redis operations
     const testKey = "test-connection"
     const testValue = "Hello Redis!"
@@ -23,7 +46,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      message: "Redis connection workings!",
+      message: "Redis connection working!",
       testResult: result,
       timestamp: new Date().toISOString(),
     })
@@ -35,9 +58,11 @@ export async function GET() {
         error: "Redis connection failed",
         details: error instanceof Error ? error.message : "Unknown error",
         envCheck: {
-          hasUrl: !!process.env.KV_REST_API_URL,
-          hasToken: !!process.env.KV_REST_API_TOKEN,
-          urlPreview: process.env.KV_REST_API_URL?.substring(0, 20) + "...",
+          hasUpstashUrl: !!process.env.UPSTASH_REDIS_REST_URL,
+          hasUpstashToken: !!process.env.UPSTASH_REDIS_REST_TOKEN,
+          hasKvUrl: !!process.env.KV_REST_API_URL,
+          hasKvToken: !!process.env.KV_REST_API_TOKEN,
+          nodeEnv: process.env.NODE_ENV,
         },
       },
       { status: 500 },
