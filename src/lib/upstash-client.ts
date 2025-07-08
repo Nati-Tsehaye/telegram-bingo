@@ -390,8 +390,8 @@ export class GameStateManager {
             await redis.del(key)
             cleanedGames++
           }
-        } catch (error) {
-          console.error(`Error cleaning game key ${key}:`, error)
+        } catch {
+          console.error(`Error cleaning game key ${key}`)
           try {
             await redis.del(key)
             cleanedGames++
@@ -439,7 +439,7 @@ export class GameStateManager {
               cleanedBoards += corruptedFields.length
             }
           }
-        } catch (error) {
+        } catch {
           console.log(`Deleting corrupted board data: ${key}`)
           try {
             await redis.del(key)
