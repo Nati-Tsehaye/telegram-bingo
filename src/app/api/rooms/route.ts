@@ -19,7 +19,7 @@ async function initializeRooms() {
     const isConnected = await GameStateManager.testConnection()
     if (!isConnected) {
       console.error("❌ Redis connection failed")
-      return false
+      throw new Error("Redis connection failed")
     }
 
     const existingRooms = await GameStateManager.getAllRooms()
@@ -34,12 +34,18 @@ async function initializeRooms() {
     console.log("🏗️ Creating default rooms...")
     const stakes = [10, 20, 50, 100]
 
-    let successCount = 0
     for (const stake of stakes) {
       const roomId = `room-${stake}`
 
       try {
-        // Create minimal room object
+        // Check if this specific room already exists
+        const existingRoom = await GameStateManager.getRoom(roomId)
+        if (existingRoom) {
+          console.log(`✅ Room ${roomId} already exists, skipping`)
+          continue
+        }
+
+        // Create minimal room object with only essential fields
         const room: GameRoom = {
           id: roomId,
           stake: stake,
@@ -52,21 +58,39 @@ async function initializeRooms() {
           hasBonus: true,
         }
 
-        console.log(`Creating room: ${roomId}`)
+        console.log(`🏗️ Creating room: ${roomId} with stake: ${stake}`)
+        console.log(`📝 Room object:`, {
+          id: room.id,
+          stake: room.stake,
+          playersLength: room.players.length,
+          status: room.status,
+        })
+
         await GameStateManager.setRoom(roomId, room)
-        console.log(`✅ Created room: ${roomId}`)
-        successCount++
+        console.log(`✅ Successfully created room: ${roomId}`)
+
+        // Verify the room was created
+        const verifyRoom = await GameStateManager.getRoom(roomId)
+        if (!verifyRoom) {
+          throw new Error(`Room verification failed for ${roomId}`)
+        }
+        console.log(`✅ Verified room: ${roomId}`)
       } catch (error) {
         console.error(`❌ Failed to create room ${roomId}:`, error)
-        // Continue with other rooms instead of failing completely
+        // Log the specific error details
+        if (error instanceof Error) {
+          console.error(`Error details: ${error.message}`)
+          console.error(`Error stack: ${error.stack}`)
+        }
+        throw new Error(`Failed to create room ${roomId}: ${error instanceof Error ? error.message : "Unknown error"}`)
       }
     }
 
-    console.log(`🎉 Room creation completed! Created ${successCount}/${stakes.length} rooms`)
-    return successCount > 0
+    console.log(`🎉 Room creation completed successfully!`)
+    return true
   } catch (error) {
     console.error("❌ Error initializing rooms:", error)
-    return false
+    throw error // Re-throw to be handled by caller
   }
 }
 
@@ -98,61 +122,87 @@ export async function GET(request: Request) {
       )
     }
 
-    // Try to initialize rooms
-    console.log("🔧 Initializing rooms...")
-    const initSuccess = await initializeRooms()
+    // Get existing rooms first
+    console.log("📋 Fetching existing rooms...")
+    let rooms: GameRoom[] = []
 
-    if (!initSuccess) {
-      console.error("⚠️ Room initialization failed")
-      // Don't fail completely, try to get existing rooms
+    try {
+      rooms = await GameStateManager.getAllRooms()
+      console.log("📊 Found existing rooms:", rooms.length)
+    } catch (error) {
+      console.error("❌ Error fetching existing rooms:", error)
+      return NextResponse.json(
+        {
+          success: false,
+          error: "Failed to fetch existing rooms",
+          details: error instanceof Error ? error.message : "Unknown error",
+          debug: true,
+        },
+        {
+          status: 500,
+          headers: corsHeaders,
+        },
+      )
     }
 
-    console.log("📋 Fetching all rooms...")
-    const rooms = await GameStateManager.getAllRooms()
-    console.log("📊 Total rooms found:", rooms.length)
-
-    // If still no rooms, create one emergency room
+    // Only try to initialize if we have no rooms
     if (rooms.length === 0) {
-      console.log("🆘 No rooms found, creating emergency room...")
+      console.log("🔧 No rooms found, initializing...")
       try {
-        const emergencyRoom: GameRoom = {
-          id: "emergency-room-10",
-          stake: 10,
-          players: [],
-          maxPlayers: 100,
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date(),
-          activeGames: 0,
-          hasBonus: true,
-        }
-
-        await GameStateManager.setRoom("emergency-room-10", emergencyRoom)
-        rooms.push(emergencyRoom)
-        console.log("✅ Created emergency room")
+        await initializeRooms()
+        // Fetch rooms again after initialization
+        rooms = await GameStateManager.getAllRooms()
+        console.log("📊 Rooms after initialization:", rooms.length)
       } catch (error) {
-        console.error("❌ Failed to create emergency room:", error)
-
-        // Return a response indicating no rooms are available
+        console.error("❌ Room initialization failed:", error)
         return NextResponse.json(
           {
-            success: true,
-            rooms: [],
-            totalPlayers: 0,
-            timestamp: new Date().toISOString(),
-            message: "No rooms available. Please try refreshing.",
+            success: false,
+            error: "Failed to initialize rooms",
+            details: error instanceof Error ? error.message : "Unknown error",
+            debug: true,
           },
           {
+            status: 500,
             headers: corsHeaders,
           },
         )
       }
     }
 
+    // If still no rooms, return empty response instead of failing
+    if (rooms.length === 0) {
+      console.log("⚠️ No rooms available after initialization")
+      return NextResponse.json(
+        {
+          success: true,
+          rooms: [],
+          totalPlayers: 0,
+          timestamp: new Date().toISOString(),
+          message: "No rooms available. Please try refreshing.",
+        },
+        {
+          headers: corsHeaders,
+        },
+      )
+    }
+
     // Filter and validate rooms
-    const validRooms = rooms.filter(
-      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number" && room.stake > 0,
-    )
+    const validRooms = rooms.filter((room) => {
+      if (!room || typeof room !== "object") {
+        console.warn("Invalid room object:", room)
+        return false
+      }
+      if (!room.id || typeof room.id !== "string") {
+        console.warn("Invalid room ID:", room.id)
+        return false
+      }
+      if (!room.stake || typeof room.stake !== "number" || room.stake <= 0) {
+        console.warn("Invalid room stake:", room.stake)
+        return false
+      }
+      return true
+    })
 
     console.log("📊 Valid rooms:", validRooms.length)
 
@@ -189,11 +239,20 @@ export async function GET(request: Request) {
     )
   } catch (error) {
     console.error("❌ Error in GET /api/rooms:", error)
+
+    // Log detailed error information
+    if (error instanceof Error) {
+      console.error("Error name:", error.name)
+      console.error("Error message:", error.message)
+      console.error("Error stack:", error.stack)
+    }
+
     return NextResponse.json(
       {
         success: false,
         error: "Failed to fetch rooms",
         details: error instanceof Error ? error.message : "Unknown error",
+        errorName: error instanceof Error ? error.name : "UnknownError",
         debug: true,
       },
       {
