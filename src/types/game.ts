@@ -6,7 +6,7 @@ export interface Player {
   joinedAt: Date
 }
 
-export interface GameRoom {
+export interface GameRoom extends Record<string, unknown> {
   id: string
   stake: number
   players: Player[]

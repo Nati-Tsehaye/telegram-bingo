@@ -1,4 +1,5 @@
 import { Redis } from "@upstash/redis"
+import type { GameRoom } from "@/types/game"
 
 // Initialize Redis client with fallback environment variables
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL
@@ -169,8 +170,8 @@ export class GameStateManager {
     }
   }
 
-  // Room management - Fixed JSON parsing with better error handling
-  static async setRoom(roomId: string, room: Record<string, unknown>) {
+  // Room management - Now properly typed to accept GameRoom
+  static async setRoom(roomId: string, room: GameRoom) {
     try {
       // Ensure the room object is properly serializable
       const roomData = {
@@ -198,7 +199,7 @@ export class GameStateManager {
     }
   }
 
-  static async getRoom(roomId: string) {
+  static async getRoom(roomId: string): Promise<GameRoom | null> {
     try {
       const data = await redis.get(`room:${roomId}`)
       if (!data) return null
@@ -219,7 +220,7 @@ export class GameStateManager {
         roomData.gameStartTime = new Date(roomData.gameStartTime)
       }
 
-      return roomData
+      return roomData as GameRoom
     } catch (error) {
       console.error(`Error getting room ${roomId}:`, error)
       // Delete corrupted data
@@ -230,7 +231,7 @@ export class GameStateManager {
     }
   }
 
-  static async getAllRooms() {
+  static async getAllRooms(): Promise<GameRoom[]> {
     try {
       const keys = await redis.keys("room:*")
       if (keys.length === 0) return []
@@ -257,7 +258,7 @@ export class GameStateManager {
               roomData.gameStartTime = new Date(roomData.gameStartTime)
             }
 
-            return roomData
+            return roomData as GameRoom
           } catch (error) {
             console.error(`Error parsing room data for key ${key}:`, error)
             // Delete corrupted data
@@ -268,7 +269,7 @@ export class GameStateManager {
           }
         }),
       )
-      return rooms.filter(Boolean)
+      return rooms.filter((room): room is GameRoom => room !== null)
     } catch (error) {
       console.error("Error getting all rooms:", error)
       return []
