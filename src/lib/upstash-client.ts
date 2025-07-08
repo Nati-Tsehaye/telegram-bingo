@@ -408,7 +408,7 @@ export class GameStateManager {
           if (data && typeof data === "string") {
             JSON.parse(data) // Test if it's valid JSON
           }
-        } catch (error) {
+        } catch {
           console.log(`Deleting corrupted room data: ${key}`)
           try {
             await redis.del(key)
