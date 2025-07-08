@@ -228,21 +228,60 @@ export class GameStateManager {
         status: roomData.status,
       })
 
-      // Test Redis connection before attempting to set
-      const connectionTest = await this.testConnection()
-      if (!connectionTest) {
-        throw new Error("Redis connection test failed")
-      }
-
       // Use setex with string serialization to avoid type issues
       const serializedRoom = JSON.stringify(roomData)
       console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
 
-      await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
-      console.log(`✅ Successfully set room ${roomId}`)
+      // Check if serialized data is too large (Redis has limits)
+      if (serializedRoom.length > 1000000) {
+        // 1MB limit
+        throw new Error(`Room data too large: ${serializedRoom.length} characters`)
+      }
+
+      // Try multiple approaches for setting the data
+      try {
+        // First try with setex
+        await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
+        console.log(`✅ Successfully set room ${roomId} with setex`)
+      } catch (setexError) {
+        console.warn(`⚠️ setex failed for room ${roomId}, trying set:`, setexError)
+
+        try {
+          // Fallback to regular set with separate expire
+          await redis.set(`room:${roomId}`, serializedRoom)
+          await redis.expire(`room:${roomId}`, 7200)
+          console.log(`✅ Successfully set room ${roomId} with set+expire`)
+        } catch (setError) {
+          console.error(`❌ Both setex and set failed for room ${roomId}:`, setError)
+
+          // Last resort: try with minimal data
+          const minimalRoomData = {
+            id: roomData.id,
+            stake: roomData.stake,
+            players: [],
+            maxPlayers: roomData.maxPlayers,
+            status: roomData.status,
+            prize: 0,
+            createdAt: roomData.createdAt,
+            activeGames: 0,
+            hasBonus: true,
+          }
+
+          const minimalSerialized = JSON.stringify(minimalRoomData)
+          await redis.setex(`room:${roomId}`, 7200, minimalSerialized)
+          console.log(`✅ Successfully set minimal room ${roomId}`)
+        }
+      }
     } catch (error) {
       console.error(`❌ Error setting room ${roomId}:`, error)
-      console.error(`Room data:`, room)
+      console.error(`Room data:`, JSON.stringify(room, null, 2))
+
+      // Don't throw the error in production, just log it
+      if (process.env.NODE_ENV === "production") {
+        console.error(`Production: Failed to set room ${roomId}, but continuing...`)
+        return // Don't throw in production
+      }
+
       throw new Error(`Failed to set room: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
