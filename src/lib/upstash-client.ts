@@ -1,17 +1,23 @@
 import { Redis } from "@upstash/redis"
 import type { GameRoom } from "@/types/game"
 
-// Initialize Redis client with fallback environment variables
+// Initialize Redis client with better error handling and logging
 const redisUrl = process.env.UPSTASH_REDIS_REST_URL || process.env.KV_REST_API_URL
 const redisToken = process.env.UPSTASH_REDIS_REST_TOKEN || process.env.KV_REST_API_TOKEN
 
+console.log("🔧 Redis Configuration Check:")
+console.log("- URL exists:", !!redisUrl)
+console.log("- Token exists:", !!redisToken)
+console.log("- URL length:", redisUrl?.length || 0)
+console.log("- Token length:", redisToken?.length || 0)
+
 if (!redisUrl || !redisToken) {
   console.error("❌ Missing Redis configuration:")
-  console.error("UPSTASH_REDIS_REST_URL:", !!process.env.UPSTASH_REDIS_REST_URL)
-  console.error("KV_REST_API_URL:", !!process.env.KV_REST_API_URL)
-  console.error("UPSTASH_REDIS_REST_TOKEN:", !!process.env.UPSTASH_REDIS_REST_TOKEN)
-  console.error("KV_REST_API_TOKEN:", !!process.env.KV_REST_API_TOKEN)
-  throw new Error("Redis configuration missing")
+  console.error(
+    "Available env vars:",
+    Object.keys(process.env).filter((key) => key.includes("REDIS") || key.includes("KV") || key.includes("UPSTASH")),
+  )
+  throw new Error(`Redis configuration missing: URL=${!!redisUrl}, Token=${!!redisToken}`)
 }
 
 export const redis = new Redis({
@@ -37,7 +43,7 @@ export class GameStateManager {
       )
     } catch (error) {
       console.error(`Error setting game state for room ${roomId}:`, error)
-      throw new Error("Failed to set game state")
+      throw new Error(`Failed to set game state: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -79,7 +85,7 @@ export class GameStateManager {
       )
     } catch (error) {
       console.error(`Error setting board selection for room ${roomId}, player ${playerId}:`, error)
-      throw new Error("Failed to set board selection")
+      throw new Error(`Failed to set board selection: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -166,18 +172,25 @@ export class GameStateManager {
       )
     } catch (error) {
       console.error(`Error removing board selection for room ${roomId}, player ${playerId}:`, error)
-      throw new Error("Failed to remove board selection")
+      throw new Error(`Failed to remove board selection: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
-  // Room management - Now properly typed to accept GameRoom
+  // Room management - Now properly typed to accept GameRoom with better error handling
   static async setRoom(roomId: string, room: GameRoom) {
     try {
+      console.log(`🏠 Setting room ${roomId}...`)
+
+      // Validate required fields
+      if (!room.id || !room.stake || typeof room.stake !== "number") {
+        throw new Error(`Invalid room data: missing id or stake`)
+      }
+
       // Ensure the room object is properly serializable
       const roomData = {
         id: room.id || roomId,
         stake: room.stake || 0,
-        players: room.players || [],
+        players: Array.isArray(room.players) ? room.players : [],
         maxPlayers: room.maxPlayers || 100,
         status: room.status || "waiting",
         prize: room.prize || 0,
@@ -186,15 +199,31 @@ export class GameStateManager {
         createdAt:
           room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
         gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
-        calledNumbers: room.calledNumbers || [],
+        calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
         currentNumber: room.currentNumber,
       }
 
+      console.log(`📝 Room data prepared for ${roomId}:`, {
+        id: roomData.id,
+        stake: roomData.stake,
+        playersCount: roomData.players.length,
+        status: roomData.status,
+      })
+
       const serializedRoom = JSON.stringify(roomData)
+      console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
+
+      // Test Redis connection before attempting to set
+      const connectionTest = await this.testConnection()
+      if (!connectionTest) {
+        throw new Error("Redis connection test failed")
+      }
+
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
     } catch (error) {
-      console.error(`Error setting room ${roomId}:`, error)
+      console.error(`❌ Error setting room ${roomId}:`, error)
+      console.error(`Room data:`, room)
       throw new Error(`Failed to set room: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
@@ -282,7 +311,7 @@ export class GameStateManager {
       await redis.setex(`player:${playerId}`, 3600, roomId)
     } catch (error) {
       console.error(`Error setting player session for ${playerId}:`, error)
-      throw new Error("Failed to set player session")
+      throw new Error(`Failed to set player session: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
@@ -359,19 +388,27 @@ export class GameStateManager {
     }
   }
 
-  // Test Redis connection
+  // Test Redis connection with detailed logging
   static async testConnection() {
     try {
+      console.log("🧪 Testing Redis connection...")
       const testKey = "connection-test"
       const testValue = "test-value"
 
+      console.log("📝 Setting test value...")
       await redis.set(testKey, testValue)
+
+      console.log("📖 Getting test value...")
       const result = await redis.get(testKey)
+
+      console.log("🗑️ Deleting test value...")
       await redis.del(testKey)
 
-      return result === testValue
+      const success = result === testValue
+      console.log(`✅ Redis connection test ${success ? "passed" : "failed"}`)
+      return success
     } catch (error) {
-      console.error("Redis connection test failed:", error)
+      console.error("❌ Redis connection test failed:", error)
       return false
     }
   }
