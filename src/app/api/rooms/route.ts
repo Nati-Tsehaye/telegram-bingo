@@ -2,6 +2,14 @@ import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
+// Add CORS headers for Telegram Mini App
+const corsHeaders = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Max-Age": "86400",
+}
+
 // Initialize default rooms in Redis if they don't exist
 async function initializeRooms() {
   try {
@@ -43,17 +51,36 @@ async function initializeRooms() {
   }
 }
 
+export async function OPTIONS() {
+  return new NextResponse(null, {
+    status: 200,
+    headers: corsHeaders,
+  })
+}
+
 export async function GET(request: Request) {
   try {
     console.log("🚀 GET /api/rooms called")
-    const { searchParams: _searchParams } = new URL(request.url)
-    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
+    const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
+    const userAgent = request.headers.get("user-agent") || "unknown"
+
+    console.log("📡 Request details:", {
+      ip: clientIp,
+      userAgent: userAgent.substring(0, 100),
+      headers: Object.fromEntries(request.headers.entries()),
+    })
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`rooms:${clientIp}`, 30, 60)
     if (!canProceed) {
       console.log("⚠️ Rate limit exceeded for IP:", clientIp)
-      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: corsHeaders,
+        },
+      )
     }
 
     console.log("🔧 Initializing rooms...")
@@ -82,21 +109,30 @@ export async function GET(request: Request) {
 
     console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalPlayers, "total players")
 
-    return NextResponse.json({
-      success: true,
-      rooms: roomSummaries,
-      totalPlayers,
-      timestamp: new Date().toISOString(),
-    })
+    return NextResponse.json(
+      {
+        success: true,
+        rooms: roomSummaries,
+        totalPlayers,
+        timestamp: new Date().toISOString(),
+      },
+      {
+        headers: corsHeaders,
+      },
+    )
   } catch (error) {
     console.error("❌ Error in GET /api/rooms:", error)
     return NextResponse.json(
       {
+        success: false,
         error: "Failed to fetch rooms",
         details: error instanceof Error ? error.message : "Unknown error",
         debug: true,
       },
-      { status: 500 },
+      {
+        status: 500,
+        headers: corsHeaders,
+      },
     )
   }
 }
@@ -104,14 +140,20 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   try {
     const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
-    const clientIp = request.headers.get("x-forwarded-for") || "unknown"
+    const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
 
     console.log("🚀 POST /api/rooms called with action:", action)
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
     if (!canProceed) {
-      return NextResponse.json({ error: "Rate limit exceeded" }, { status: 429 })
+      return NextResponse.json(
+        { error: "Rate limit exceeded" },
+        {
+          status: 429,
+          headers: corsHeaders,
+        },
+      )
     }
 
     await initializeRooms()
@@ -119,30 +161,59 @@ export async function POST(request: Request) {
     switch (action) {
       case "join":
         if (!roomId) {
-          return NextResponse.json({ error: "Room ID required" }, { status: 400 })
+          return NextResponse.json(
+            { error: "Room ID required" },
+            {
+              status: 400,
+              headers: corsHeaders,
+            },
+          )
         }
 
         const room = await GameStateManager.getRoom(roomId)
         if (!room) {
-          return NextResponse.json({ error: "Room not found" }, { status: 404 })
+          return NextResponse.json(
+            { error: "Room not found" },
+            {
+              status: 404,
+              headers: corsHeaders,
+            },
+          )
         }
 
         if ((room.players?.length || 0) >= room.maxPlayers) {
-          return NextResponse.json({ error: "Room is full" }, { status: 400 })
+          return NextResponse.json(
+            { error: "Room is full" },
+            {
+              status: 400,
+              headers: corsHeaders,
+            },
+          )
         }
 
         if (room.status !== "waiting") {
-          return NextResponse.json({ error: "Game already started" }, { status: 400 })
+          return NextResponse.json(
+            { error: "Game already started" },
+            {
+              status: 400,
+              headers: corsHeaders,
+            },
+          )
         }
 
         // Check if player is already in this room
         const existingPlayer = room.players?.find((p: Player) => p.id === playerId)
         if (existingPlayer) {
-          return NextResponse.json({
-            success: true,
-            room,
-            message: "Already in room",
-          })
+          return NextResponse.json(
+            {
+              success: true,
+              room,
+              message: "Already in room",
+            },
+            {
+              headers: corsHeaders,
+            },
+          )
         }
 
         // Remove player from other rooms first
@@ -193,11 +264,16 @@ export async function POST(request: Request) {
         await GameStateManager.setRoom(roomId, room)
         await GameStateManager.setPlayerSession(playerId, roomId)
 
-        return NextResponse.json({
-          success: true,
-          room,
-          message: "Joined room successfully",
-        })
+        return NextResponse.json(
+          {
+            success: true,
+            room,
+            message: "Joined room successfully",
+          },
+          {
+            headers: corsHeaders,
+          },
+        )
 
       case "leave":
         const playerRoomId = await GameStateManager.getPlayerSession(playerId)
@@ -221,22 +297,37 @@ export async function POST(request: Request) {
 
         await GameStateManager.removePlayerSession(playerId)
 
-        return NextResponse.json({
-          success: true,
-          message: "Left room successfully",
-        })
+        return NextResponse.json(
+          {
+            success: true,
+            message: "Left room successfully",
+          },
+          {
+            headers: corsHeaders,
+          },
+        )
 
       default:
-        return NextResponse.json({ error: "Invalid action" }, { status: 400 })
+        return NextResponse.json(
+          { error: "Invalid action" },
+          {
+            status: 400,
+            headers: corsHeaders,
+          },
+        )
     }
   } catch (error) {
     console.error("❌ Error handling room action:", error)
     return NextResponse.json(
       {
+        success: false,
         error: "Internal server error",
         details: error instanceof Error ? error.message : "Unknown error",
       },
-      { status: 500 },
+      {
+        status: 500,
+        headers: corsHeaders,
+      },
     )
   }
 }
