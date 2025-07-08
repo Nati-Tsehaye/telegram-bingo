@@ -206,7 +206,7 @@ export default function Homepage() {
     }
   }, [webApp, handleRefresh, currentScreen])
 
-  const tabs = ["Stake", "Active", "Players", "Derash", "Play"]
+  const tabs = ["Stake", "Active", "Players", "Derash", "Play", "fuck"]
 
   if (!isReady) {
     return (
