@@ -14,58 +14,100 @@ export default function Homepage() {
   const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
   const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
-  const [connectingRoomId, setConnectingRoomId] = useState<string | null>(null) // Track which room is connecting
+  const [connectingRoomId, setConnectingRoomId] = useState<string | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+  const [error, setError] = useState<string | null>(null)
 
-  // Fetch rooms from API
+  // Fetch rooms from API with better error handling
   const fetchRooms = useCallback(async () => {
     try {
       setIsLoading(true)
-      const response = await fetch("/api/rooms")
+      setError(null)
+
+      console.log("🔄 Fetching rooms...")
+
+      // Use absolute URL for Telegram Mini App
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const url = `${baseUrl}/api/rooms`
+
+      console.log("📡 Request URL:", url)
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        // Add cache busting
+        cache: "no-cache",
+      })
+
+      console.log("📊 Response status:", response.status)
+      console.log("📊 Response headers:", Object.fromEntries(response.headers.entries()))
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("❌ HTTP Error:", response.status, errorText)
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
       const data: RoomResponse = await response.json()
+      console.log("✅ Fetched data:", data)
 
       if (data.success) {
         setGameRooms(data.rooms)
         setTotalPlayers(data.totalPlayers)
         setLastUpdate(new Date())
+        console.log(`✅ Loaded ${data.rooms.length} rooms with ${data.totalPlayers} total players`)
+      } else {
+        throw new Error("API returned success: false")
       }
     } catch (error) {
-      console.error("Failed to fetch rooms:", error)
-      webApp?.showAlert("Failed to load rooms. Please try again.")
+      console.error("❌ Failed to fetch rooms:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      setError(errorMessage)
+      webApp?.showAlert(`Failed to load rooms: ${errorMessage}`)
     } finally {
       setIsLoading(false)
     }
   }, [webApp])
 
-  // Load rooms only once when component mounts and when returning to lobby
-  // NO AUTO-REFRESH - only manual refresh
+  // Load rooms when component mounts and when returning to lobby
   useEffect(() => {
     if (isReady && currentScreen === "lobby") {
+      console.log("🚀 Component ready, fetching rooms...")
       fetchRooms()
     }
   }, [isReady, currentScreen, fetchRooms])
 
   const handleRefresh = useCallback(() => {
+    console.log("🔄 Manual refresh triggered")
     webApp?.HapticFeedback.impactOccurred("medium")
     fetchRooms()
   }, [webApp, fetchRooms])
 
   const handlePlay = async (room: GameRoomSummary) => {
-    if (connectingRoomId) return // Prevent multiple simultaneous connections
+    if (connectingRoomId) return
 
     webApp?.HapticFeedback.impactOccurred("heavy")
-
-    // Set the connecting room ID to show loading state for this specific room
     setConnectingRoomId(room.id)
 
     try {
       const playerId = user?.id?.toString() || `guest-${Date.now()}`
-      const response = await fetch("/api/rooms", {
+
+      // Use absolute URL for Telegram Mini App
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const url = `${baseUrl}/api/rooms`
+
+      console.log("🎮 Joining room:", room.id, "Player:", playerId)
+
+      const response = await fetch(url, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
         body: JSON.stringify({
           action: "join",
@@ -88,7 +130,7 @@ export default function Homepage() {
         webApp?.BackButton.show()
         webApp?.BackButton.onClick(async () => {
           // Leave room when going back
-          await fetch("/api/rooms", {
+          await fetch(url, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
@@ -102,7 +144,7 @@ export default function Homepage() {
           setCurrentScreen("lobby")
           setSelectedRoom(null)
           webApp?.BackButton.hide()
-          fetchRooms() // Refresh rooms when returning
+          fetchRooms()
         })
       } else {
         webApp?.showAlert(data.error || "Failed to join room")
@@ -111,7 +153,7 @@ export default function Homepage() {
       console.error("Failed to join room:", error)
       webApp?.showAlert("Failed to join room. Please try again.")
     } finally {
-      setConnectingRoomId(null) // Clear the connecting state
+      setConnectingRoomId(null)
     }
   }
 
@@ -206,12 +248,34 @@ export default function Homepage() {
         </div>
       </div>
 
+      {/* Debug Info - Show in development */}
+      {process.env.NODE_ENV === "development" && (
+        <div className="bg-yellow-500 text-black p-2 text-xs">
+          <div>Environment: {process.env.NODE_ENV}</div>
+          <div>App URL: {process.env.NEXT_PUBLIC_APP_URL || "Not set"}</div>
+          <div>Is Telegram: {webApp ? "Yes" : "No"}</div>
+          <div>User ID: {user?.id || "None"}</div>
+          <div>Rooms loaded: {gameRooms.length}</div>
+          {error && <div className="text-red-600">Error: {error}</div>}
+        </div>
+      )}
+
       {/* Game Rooms */}
       <div className="p-4 space-y-3">
         {isLoading ? (
           <div className="text-center text-white/70 py-8">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
             <p>Loading rooms...</p>
+          </div>
+        ) : error ? (
+          <div className="text-center text-white/70 py-8">
+            <div className="bg-red-500/20 border border-red-500 rounded-lg p-4 mb-4">
+              <p className="text-red-300 font-medium">Failed to load rooms</p>
+              <p className="text-red-200 text-sm mt-1">{error}</p>
+            </div>
+            <Button onClick={handleRefresh} className="bg-orange-500 hover:bg-orange-600">
+              Try Again
+            </Button>
           </div>
         ) : gameRooms.length === 0 ? (
           <div className="text-center text-white/70 py-8">
