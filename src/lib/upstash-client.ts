@@ -170,23 +170,23 @@ export class GameStateManager {
   }
 
   // Room management - Fixed JSON parsing with better error handling
-  static async setRoom(roomId: string, room: unknown) {
+  static async setRoom(roomId: string, room: Record<string, unknown>) {
     try {
       // Ensure the room object is properly serializable
       const roomData = {
-        ...room,
+        id: room.id || roomId,
+        stake: room.stake || 0,
+        players: room.players || [],
+        maxPlayers: room.maxPlayers || 100,
+        status: room.status || "waiting",
+        prize: room.prize || 0,
+        activeGames: room.activeGames || 0,
+        hasBonus: room.hasBonus !== false,
         createdAt:
-          room && typeof room === "object" && "createdAt" in room
-            ? room.createdAt instanceof Date
-              ? room.createdAt.toISOString()
-              : room.createdAt
-            : new Date().toISOString(),
-        gameStartTime:
-          room && typeof room === "object" && "gameStartTime" in room && room.gameStartTime
-            ? room.gameStartTime instanceof Date
-              ? room.gameStartTime.toISOString()
-              : room.gameStartTime
-            : undefined,
+          room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
+        gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
+        calledNumbers: room.calledNumbers || [],
+        currentNumber: room.currentNumber,
       }
 
       const serializedRoom = JSON.stringify(roomData)
