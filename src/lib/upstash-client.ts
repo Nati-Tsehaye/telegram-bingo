@@ -270,10 +270,18 @@ export class GameStateManager {
 
       // Convert player joinedAt back to Date objects
       if (Array.isArray(roomData.players)) {
-        roomData.players = roomData.players.map((player: any) => ({
-          ...player,
-          joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
-        }))
+        roomData.players = roomData.players.map(
+          (player: {
+            id: string
+            name: string
+            telegramId?: number
+            avatar?: string
+            joinedAt: string | Date
+          }) => ({
+            ...player,
+            joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
+          }),
+        )
       }
 
       return roomData as GameRoom
@@ -316,10 +324,18 @@ export class GameStateManager {
 
             // Convert player joinedAt back to Date objects
             if (Array.isArray(roomData.players)) {
-              roomData.players = roomData.players.map((player: any) => ({
-                ...player,
-                joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
-              }))
+              roomData.players = roomData.players.map(
+                (player: {
+                  id: string
+                  name: string
+                  telegramId?: number
+                  avatar?: string
+                  joinedAt: string | Date
+                }) => ({
+                  ...player,
+                  joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
+                }),
+              )
             }
 
             return roomData as GameRoom
