@@ -33,8 +33,8 @@ export class GameStateManager {
         return JSON.parse(data)
       }
       return data // Already parsed by Upstash client
-    } catch (error) {
-      console.error(`Error getting game state for room ${roomId}:`, error)
+    } catch {
+      console.error(`Error getting game state for room ${roomId}`)
       // Delete corrupted data
       await redis.del(`game:${roomId}`)
       return null
@@ -57,9 +57,9 @@ export class GameStateManager {
           timestamp: new Date().toISOString(),
         }),
       )
-    } catch (error) {
-      console.error(`Error setting board selection for room ${roomId}, player ${playerId}:`, error)
-      throw error
+    } catch {
+      console.error(`Error setting board selection for room ${roomId}, player ${playerId}`)
+      throw new Error("Failed to set board selection")
     }
   }
 
@@ -104,8 +104,8 @@ export class GameStateManager {
             console.warn(`Invalid selection structure for player ${playerId}:`, parsedData)
             corruptedKeys.push(playerId)
           }
-        } catch (parseError) {
-          console.error(`Error parsing selection for player ${playerId}:`, parseError)
+        } catch {
+          console.error(`Error parsing selection for player ${playerId}`)
           corruptedKeys.push(playerId)
         }
       }
@@ -117,8 +117,8 @@ export class GameStateManager {
       }
 
       return validSelections
-    } catch (error) {
-      console.error(`Error getting board selections for room ${roomId}:`, error)
+    } catch {
+      console.error(`Error getting board selections for room ${roomId}`)
       // If there's a major error, clear the entire hash and return empty array
       await redis.del(`boards:${roomId}`)
       return []
@@ -138,9 +138,9 @@ export class GameStateManager {
           timestamp: new Date().toISOString(),
         }),
       )
-    } catch (error) {
-      console.error(`Error removing board selection for room ${roomId}, player ${playerId}:`, error)
-      throw error
+    } catch {
+      console.error(`Error removing board selection for room ${roomId}, player ${playerId}`)
+      throw new Error("Failed to remove board selection")
     }
   }
 
@@ -148,9 +148,9 @@ export class GameStateManager {
   static async setRoom(roomId: string, room: unknown) {
     try {
       await redis.setex(`room:${roomId}`, 7200, JSON.stringify(room)) // 2 hours TTL
-    } catch (error) {
-      console.error(`Error setting room ${roomId}:`, error)
-      throw error
+    } catch {
+      console.error(`Error setting room ${roomId}`)
+      throw new Error("Failed to set room")
     }
   }
 
@@ -164,8 +164,8 @@ export class GameStateManager {
         return JSON.parse(data)
       }
       return data // Already parsed by Upstash client
-    } catch (error) {
-      console.error(`Error getting room ${roomId}:`, error)
+    } catch {
+      console.error(`Error getting room ${roomId}`)
       // Delete corrupted data
       await redis.del(`room:${roomId}`)
       return null
@@ -188,8 +188,8 @@ export class GameStateManager {
               return JSON.parse(data)
             }
             return data // Already parsed by Upstash client
-          } catch (error) {
-            console.error(`Error parsing room data for key ${key}:`, error)
+          } catch {
+            console.error(`Error parsing room data for key ${key}`)
             // Delete corrupted data
             await redis.del(key)
             return null
@@ -197,8 +197,8 @@ export class GameStateManager {
         }),
       )
       return rooms.filter(Boolean)
-    } catch (error) {
-      console.error("Error getting all rooms:", error)
+    } catch {
+      console.error("Error getting all rooms")
       return []
     }
   }
@@ -207,9 +207,9 @@ export class GameStateManager {
   static async setPlayerSession(playerId: string, roomId: string) {
     try {
       await redis.setex(`player:${playerId}`, 3600, roomId)
-    } catch (error) {
-      console.error(`Error setting player session for ${playerId}:`, error)
-      throw error
+    } catch {
+      console.error(`Error setting player session for ${playerId}`)
+      throw new Error("Failed to set player session")
     }
   }
 
@@ -260,8 +260,8 @@ export class GameStateManager {
 
       await this.setGameState(roomId, gameState)
       return newNumber
-    } catch (error) {
-      console.error(`Error calling next number for room ${roomId}:`, error)
+    } catch {
+      console.error(`Error calling next number for room ${roomId}`)
       return null
     }
   }
@@ -271,8 +271,8 @@ export class GameStateManager {
     try {
       const key = `scheduler:${roomId}`
       await redis.setex(key, 300, "active") // 5 minutes TTL
-    } catch (error) {
-      console.error(`Error scheduling number calling for room ${roomId}:`, error)
+    } catch {
+      console.error(`Error scheduling number calling for room ${roomId}`)
     }
   }
 
@@ -280,8 +280,8 @@ export class GameStateManager {
     try {
       const key = `scheduler:${roomId}`
       return await redis.exists(key)
-    } catch (error) {
-      console.error(`Error checking number calling status for room ${roomId}:`, error)
+    } catch {
+      console.error(`Error checking number calling status for room ${roomId}`)
       return false
     }
   }
@@ -301,8 +301,8 @@ export class GameStateManager {
             await redis.del(key)
             cleanedGames++
           }
-        } catch (error) {
-          console.error(`Error cleaning game key ${key}:`, error)
+        } catch {
+          console.error(`Error cleaning game key ${key}`)
           await redis.del(key)
           cleanedGames++
         }
@@ -317,7 +317,7 @@ export class GameStateManager {
           if (data && typeof data === "string") {
             JSON.parse(data) // Test if it's valid JSON
           }
-        } catch (error) {
+        } catch {
           console.log(`Deleting corrupted room data: ${key}`)
           await redis.del(key)
           cleanedRooms++
@@ -346,7 +346,7 @@ export class GameStateManager {
               cleanedBoards += corruptedFields.length
             }
           }
-        } catch (error) {
+        } catch {
           console.log(`Deleting corrupted board data: ${key}`)
           await redis.del(key)
           cleanedBoards++
@@ -356,8 +356,8 @@ export class GameStateManager {
       console.log(
         `✅ Cleanup completed: ${cleanedGames} games, ${cleanedRooms} rooms, ${cleanedBoards} board selections`,
       )
-    } catch (error) {
-      console.error("Error during cleanup:", error)
+    } catch {
+      console.error("Error during cleanup")
     }
   }
 
@@ -369,8 +369,8 @@ export class GameStateManager {
         await redis.del(...allKeys)
       }
       console.log(`Cleared ${allKeys.length} keys from Redis`)
-    } catch (error) {
-      console.error("Error clearing data:", error)
+    } catch {
+      console.error("Error clearing data")
     }
   }
 }
@@ -387,8 +387,8 @@ export class RateLimiter {
       }
 
       return current <= limit
-    } catch (error) {
-      console.error(`Error checking rate limit for ${identifier}:`, error)
+    } catch {
+      console.error(`Error checking rate limit for ${identifier}`)
       return true // Allow request if rate limiting fails
     }
   }
