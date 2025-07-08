@@ -179,78 +179,132 @@ export class GameStateManager {
     }
   }
 
-  // Simplified and more robust room management
+  // Completely rewritten room management with better error handling
   static async setRoom(roomId: string, room: GameRoom) {
     try {
       console.log(`🏠 Setting room ${roomId}...`)
 
-      // Basic validation
-      if (!roomId || typeof roomId !== "string") {
-        throw new Error(`Invalid room ID: ${roomId}`)
+      // Step 1: Validate inputs
+      if (!roomId || typeof roomId !== "string" || roomId.trim() === "") {
+        throw new Error(`Invalid room ID: "${roomId}"`)
       }
 
       if (!room || typeof room !== "object") {
-        throw new Error(`Invalid room object`)
+        throw new Error(`Invalid room object: ${typeof room}`)
       }
 
-      if (!room.stake || typeof room.stake !== "number" || room.stake <= 0) {
-        throw new Error(`Invalid stake: ${room.stake}`)
-      }
-
-      // Create a clean, serializable room object with minimal required fields
-      const cleanRoom = {
-        id: String(roomId),
-        stake: Number(room.stake),
-        players: [], // Always start with empty players array to avoid serialization issues
-        maxPlayers: Number(room.maxPlayers || 100),
+      // Step 2: Create a minimal, safe room object
+      const safeRoom = {
+        id: String(roomId).trim(),
+        stake: Number(room.stake) || 10,
+        players: [], // Always start empty to avoid serialization issues
+        maxPlayers: Number(room.maxPlayers) || 100,
         status: String(room.status || "waiting"),
-        prize: Number(room.prize || 0),
-        activeGames: Number(room.activeGames || 0),
+        prize: Number(room.prize) || 0,
+        activeGames: Number(room.activeGames) || 0,
         hasBonus: Boolean(room.hasBonus !== false),
         createdAt: new Date().toISOString(),
-        gameStartTime: undefined,
-        calledNumbers: [],
-        currentNumber: undefined,
       }
 
-      console.log(`📝 Clean room data for ${roomId}:`, {
-        id: cleanRoom.id,
-        stake: cleanRoom.stake,
-        status: cleanRoom.status,
-        maxPlayers: cleanRoom.maxPlayers,
+      console.log(`📝 Safe room object:`, {
+        id: safeRoom.id,
+        stake: safeRoom.stake,
+        status: safeRoom.status,
+        maxPlayers: safeRoom.maxPlayers,
       })
 
-      // Test serialization
-      const serialized = JSON.stringify(cleanRoom)
-      console.log(`💾 Serialized size: ${serialized.length} chars`)
-
-      // Test deserialization
-      const parsed = JSON.parse(serialized)
-      if (!parsed.id || !parsed.stake) {
-        throw new Error("Serialization test failed")
+      // Step 3: Test JSON serialization
+      let serializedRoom: string
+      try {
+        serializedRoom = JSON.stringify(safeRoom)
+        console.log(`💾 Serialization successful, size: ${serializedRoom.length} chars`)
+      } catch (serializationError) {
+        console.error(`❌ JSON serialization failed:`, serializationError)
+        throw new Error(
+          `Room serialization failed: ${serializationError instanceof Error ? serializationError.message : "Unknown error"}`,
+        )
       }
 
-      // Store in Redis with shorter TTL for testing
-      await redis.setex(`room:${roomId}`, 3600, serialized) // 1 hour TTL
-      console.log(`✅ Successfully stored room ${roomId}`)
-
-      // Verify storage by reading back
-      const verification = await redis.get(`room:${roomId}`)
-      if (!verification) {
-        throw new Error("Room verification failed - could not read back")
+      // Step 4: Test JSON deserialization
+      try {
+        const testParse = JSON.parse(serializedRoom)
+        if (!testParse.id || !testParse.stake) {
+          throw new Error("Parsed object missing required fields")
+        }
+        console.log(`✅ Deserialization test passed`)
+      } catch (deserializationError) {
+        console.error(`❌ JSON deserialization test failed:`, deserializationError)
+        throw new Error(
+          `Room deserialization test failed: ${deserializationError instanceof Error ? deserializationError.message : "Unknown error"}`,
+        )
       }
 
-      console.log(`✅ Room ${roomId} verified in Redis`)
+      // Step 5: Store in Redis using simple SET command
+      const redisKey = `room:${roomId}`
+      console.log(`💾 Storing in Redis with key: ${redisKey}`)
+
+      try {
+        // Use simple set with TTL instead of setex to avoid potential issues
+        await redis.set(redisKey, serializedRoom)
+        await redis.expire(redisKey, 3600) // 1 hour TTL
+        console.log(`✅ Redis SET operation successful`)
+      } catch (redisError) {
+        console.error(`❌ Redis SET operation failed:`, redisError)
+
+        // Log Redis error details
+        if (redisError instanceof Error) {
+          console.error(`Redis error name: ${redisError.name}`)
+          console.error(`Redis error message: ${redisError.message}`)
+          console.error(`Redis error stack: ${redisError.stack}`)
+        }
+
+        throw new Error(
+          `Redis storage failed: ${redisError instanceof Error ? redisError.message : "Unknown Redis error"}`,
+        )
+      }
+
+      // Step 6: Verify the data was stored correctly
+      try {
+        const verification = await redis.get(redisKey)
+        if (!verification) {
+          throw new Error("Verification failed - no data returned")
+        }
+
+        // Test parsing the retrieved data
+        const parsedVerification = typeof verification === "string" ? JSON.parse(verification) : verification
+        if (!parsedVerification.id || parsedVerification.id !== roomId) {
+          throw new Error("Verification failed - data mismatch")
+        }
+
+        console.log(`✅ Room ${roomId} verified in Redis`)
+      } catch (verificationError) {
+        console.error(`❌ Room verification failed:`, verificationError)
+        // Clean up the potentially corrupted data
+        try {
+          await redis.del(redisKey)
+        } catch {}
+        throw new Error(
+          `Room verification failed: ${verificationError instanceof Error ? verificationError.message : "Unknown error"}`,
+        )
+      }
+
+      console.log(`🎉 Successfully set room ${roomId}`)
     } catch (error) {
       console.error(`❌ Error setting room ${roomId}:`, error)
-      console.error(`Room data type:`, typeof room)
-      console.error(`Room keys:`, room ? Object.keys(room) : "null")
 
-      // Log the actual error details
+      // Log comprehensive error details
       if (error instanceof Error) {
+        console.error(`Error type: ${error.constructor.name}`)
         console.error(`Error name: ${error.name}`)
         console.error(`Error message: ${error.message}`)
         console.error(`Error stack: ${error.stack}`)
+      }
+
+      // Log room data for debugging
+      console.error(`Room data type: ${typeof room}`)
+      if (room && typeof room === "object") {
+        console.error(`Room keys: ${Object.keys(room)}`)
+        console.error(`Room values: ${JSON.stringify(room, null, 2)}`)
       }
 
       throw new Error(`Failed to set room ${roomId}: ${error instanceof Error ? error.message : "Unknown error"}`)
