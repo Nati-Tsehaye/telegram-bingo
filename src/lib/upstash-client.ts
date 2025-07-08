@@ -216,8 +216,8 @@ export class GameStateManager {
   static async getPlayerSession(playerId: string) {
     try {
       return await redis.get(`player:${playerId}`)
-    } catch (error) {
-      console.error(`Error getting player session for ${playerId}:`, error)
+    } catch (_error) {
+      console.error(`Error getting player session for ${playerId}:`, _error)
       return null
     }
   }
@@ -225,9 +225,9 @@ export class GameStateManager {
   static async removePlayerSession(playerId: string) {
     try {
       await redis.del(`player:${playerId}`)
-    } catch (error) {
-      console.error(`Error removing player session for ${playerId}:`, error)
-      throw error
+    } catch (_error) {
+      console.error(`Error removing player session for ${playerId}:`, _error)
+      throw _error // Corrected variable name
     }
   }
 
