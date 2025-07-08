@@ -129,10 +129,11 @@ export async function GET(request: Request) {
       maxPlayers: room.maxPlayers || 100,
       status: room.status || "waiting",
       prize: (Array.isArray(room.players) ? room.players.length : 0) * room.stake,
-      createdAt: room.createdAt || new Date().toISOString(),
+      createdAt:
+        room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
       activeGames: room.activeGames || 0,
       hasBonus: room.hasBonus !== false,
-      gameStartTime: room.gameStartTime,
+      gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
       calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
       currentNumber: room.currentNumber,
     }))
