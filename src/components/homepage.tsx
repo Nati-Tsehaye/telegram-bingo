@@ -1,478 +1,436 @@
-import { NextResponse } from "next/server"
-import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
-import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
+"use client"
 
-// Add CORS headers for Telegram Mini App
-const corsHeaders = {
-  "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-  "Access-Control-Allow-Headers": "Content-Type, Authorization",
-  "Access-Control-Max-Age": "86400",
-}
+import { useState, useEffect, useCallback } from "react"
+import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
+import { RefreshCw, Users, Coins, User, Zap } from "lucide-react"
+import GameScreen from "@/components/game-screen"
+import { useTelegram } from "@/components/telegram-provider"
+import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
-// Initialize default rooms in Redis if they don't exist
-async function initializeRooms() {
-  try {
-    console.log("🔍 Checking for existing rooms...")
+function Homepage() {
+  const { webApp, user, isReady } = useTelegram()
+  const [activeTab, setActiveTab] = useState("Stake")
+  const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
+  const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
+  const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
+  const [connectingRoomId, setConnectingRoomId] = useState<string | null>(null)
+  const [isLoading, setIsLoading] = useState(true)
+  const [totalPlayers, setTotalPlayers] = useState(0)
+  const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
+  const [error, setError] = useState<string | null>(null)
 
-    // First test Redis connection
-    const isConnected = await GameStateManager.testConnection()
-    if (!isConnected) {
-      throw new Error("Redis connection failed")
-    }
-
-    const existingRooms = await GameStateManager.getAllRooms()
-    console.log("📊 Found existing rooms:", existingRooms.length)
-
-    // If we have rooms, just return - don't try to create more
-    if (existingRooms.length > 0) {
-      console.log("✅ Using existing rooms, skipping initialization")
-      return
-    }
-
-    console.log("🏗️ Creating default rooms...")
-    const stakes = [10, 20, 50, 100, 200, 500]
-
-    // Create rooms sequentially to avoid overwhelming Redis
-    for (const stake of stakes) {
-      const roomId = `room-${stake}`
-
-      // Check if this specific room already exists
-      const existingRoom = await GameStateManager.getRoom(roomId)
-      if (existingRoom) {
-        console.log(`✅ Room ${roomId} already exists, skipping`)
-        continue
-      }
-
-      // Create minimal room object to avoid serialization issues
-      const room: GameRoom = {
-        id: roomId,
-        stake,
-        players: [],
-        maxPlayers: 100,
-        status: "waiting",
-        prize: 0,
-        createdAt: new Date(),
-        activeGames: 0,
-        hasBonus: true,
-      }
-
-      try {
-        console.log(`Creating room: ${roomId}`)
-        await GameStateManager.setRoom(roomId, room)
-        console.log(`✅ Created room: ${roomId}`)
-
-        // Add small delay between room creations to avoid overwhelming Redis
-        await new Promise((resolve) => setTimeout(resolve, 100))
-      } catch (error) {
-        console.error(`❌ Failed to create room ${roomId}:`, error)
-        // Don't throw here, continue with other rooms
-        // We'll create a fallback room later if needed
-      }
-    }
-    console.log("🎉 Room creation process completed!")
-  } catch (error) {
-    console.error("❌ Error initializing rooms:", error)
-    // Don't throw the error, just log it and continue
-    console.log("⚠️ Continuing with existing rooms despite initialization error")
-  }
-}
-
-export async function OPTIONS() {
-  return new NextResponse(null, {
-    status: 200,
-    headers: corsHeaders,
-  })
-}
-
-export async function GET(request: Request) {
-  try {
-    console.log("🚀 GET /api/rooms called")
-    const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-
-    // Rate limiting
-    const canProceed = await RateLimiter.checkLimit(`rooms:${clientIp}`, 30, 60)
-    if (!canProceed) {
-      console.log("⚠️ Rate limit exceeded for IP:", clientIp)
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Rate limit exceeded",
-        },
-        {
-          status: 429,
-          headers: corsHeaders,
-        },
-      )
-    }
-
-    // Try to initialize rooms, but don't fail if it doesn't work
+  // Fetch rooms from API with better error handling
+  const fetchRooms = useCallback(async () => {
     try {
-      console.log("🔧 Initializing rooms...")
-      await initializeRooms()
+      setIsLoading(true)
+      setError(null)
+
+      console.log("🔄 Fetching rooms...")
+
+      // Use absolute URL for Telegram Mini App
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const url = `${baseUrl}/api/rooms`
+
+      console.log("📡 Request URL:", url)
+
+      const response = await fetch(url, {
+        method: "GET",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        // Add cache busting
+        cache: "no-cache",
+      })
+
+      console.log("📊 Response status:", response.status)
+      console.log("📊 Response headers:", Object.fromEntries(response.headers.entries()))
+
+      if (!response.ok) {
+        const errorText = await response.text()
+        console.error("❌ HTTP Error:", response.status, errorText)
+        throw new Error(`HTTP ${response.status}: ${errorText}`)
+      }
+
+      const data: RoomResponse = await response.json()
+      console.log("✅ Fetched data:", data)
+
+      if (data.success) {
+        setGameRooms(data.rooms)
+        setTotalPlayers(data.totalPlayers)
+        setLastUpdate(new Date())
+        console.log(`✅ Loaded ${data.rooms.length} rooms with ${data.totalPlayers} total players`)
+
+        // Show fallback message if using fallback data
+        if ("fallback" in data && data.fallback) {
+          console.warn("⚠️ Using fallback room data")
+          webApp?.showAlert("Using backup room data. Some features may be limited.")
+        }
+      } else {
+        throw new Error("API returned success: false")
+      }
     } catch (error) {
-      console.error("⚠️ Room initialization failed, but continuing:", error)
-    }
+      console.error("❌ Failed to fetch rooms:", error)
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      setError(errorMessage)
 
-    console.log("📋 Fetching all rooms...")
-    let rooms = await GameStateManager.getAllRooms()
-    console.log("📊 Total rooms found:", rooms.length)
+      // Don't show alert in Telegram if it's a network error - just log it
+      if (webApp && !errorMessage.includes("HTTP 500")) {
+        webApp.showAlert(`Failed to load rooms: ${errorMessage}`)
+      }
 
-    // If no rooms exist, create a minimal emergency room
-    if (rooms.length === 0) {
-      console.log("🆘 No rooms found, creating emergency fallback room...")
-      try {
-        const fallbackRoom: GameRoom = {
-          id: "room-emergency-10",
+      // Set fallback rooms if fetch completely fails
+      const fallbackRooms: GameRoomSummary[] = [
+        {
+          id: "room-fallback-10",
           stake: 10,
-          players: [],
+          players: 0,
           maxPlayers: 100,
           status: "waiting",
           prize: 0,
-          createdAt: new Date(),
+          createdAt: new Date().toISOString(),
           activeGames: 0,
           hasBonus: true,
-        }
+          calledNumbers: [],
+          currentNumber: undefined,
+        },
+        {
+          id: "room-fallback-20",
+          stake: 20,
+          players: 0,
+          maxPlayers: 100,
+          status: "waiting",
+          prize: 0,
+          createdAt: new Date().toISOString(),
+          activeGames: 0,
+          hasBonus: true,
+          calledNumbers: [],
+          currentNumber: undefined,
+        },
+      ]
 
-        // Try to create the fallback room
-        await GameStateManager.setRoom("room-emergency-10", fallbackRoom)
-        rooms = [fallbackRoom]
-        console.log("✅ Created emergency fallback room")
-      } catch (error) {
-        console.error("❌ Failed to create emergency room:", error)
+      setGameRooms(fallbackRooms)
+      setTotalPlayers(0)
+      setLastUpdate(new Date())
+      console.log("🆘 Using client-side fallback rooms")
+    } finally {
+      setIsLoading(false)
+    }
+  }, [webApp])
 
-        // Return a hardcoded room list as last resort
-        const hardcodedRooms: GameRoomSummary[] = [
-          {
-            id: "room-10",
-            stake: 10,
-            players: 0,
-            maxPlayers: 100,
-            status: "waiting",
-            prize: 0,
-            createdAt: new Date().toISOString(),
-            activeGames: 0,
-            hasBonus: true,
-            calledNumbers: [],
-            currentNumber: undefined,
-          },
-          {
-            id: "room-20",
-            stake: 20,
-            players: 0,
-            maxPlayers: 100,
-            status: "waiting",
-            prize: 0,
-            createdAt: new Date().toISOString(),
-            activeGames: 0,
-            hasBonus: true,
-            calledNumbers: [],
-            currentNumber: undefined,
-          },
-        ]
+  // Load rooms when component mounts and when returning to lobby
+  useEffect(() => {
+    if (isReady && currentScreen === "lobby") {
+      console.log("🚀 Component ready, fetching rooms...")
+      fetchRooms()
+    }
+  }, [isReady, currentScreen, fetchRooms])
 
-        console.log("🆘 Using hardcoded fallback rooms")
-        return NextResponse.json(
-          {
-            success: true,
-            rooms: hardcodedRooms,
-            totalPlayers: 0,
-            timestamp: new Date().toISOString(),
-            fallback: true,
-            message: "Using fallback rooms due to Redis issues",
+  const handleRefresh = useCallback(() => {
+    console.log("🔄 Manual refresh triggered")
+    webApp?.HapticFeedback.impactOccurred("medium")
+    fetchRooms()
+  }, [webApp, fetchRooms])
+
+  const handlePlay = async (room: GameRoomSummary) => {
+    if (connectingRoomId) return
+
+    webApp?.HapticFeedback.impactOccurred("heavy")
+    setConnectingRoomId(room.id)
+
+    try {
+      const playerId = user?.id?.toString() || `guest-${Date.now()}`
+
+      // Use absolute URL for Telegram Mini App
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const url = `${baseUrl}/api/rooms`
+
+      console.log("🎮 Joining room:", room.id, "Player:", playerId)
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "application/json",
+        },
+        body: JSON.stringify({
+          action: "join",
+          roomId: room.id,
+          playerId,
+          playerData: {
+            name: user?.first_name || "Guest Player",
+            telegramId: user?.id,
           },
-          {
-            headers: corsHeaders,
-          },
-        )
+        }),
+      })
+
+      const data = await response.json()
+
+      if (data.success) {
+        setSelectedRoom(data.room)
+        setCurrentScreen("game")
+
+        // Configure back button
+        webApp?.BackButton.show()
+        webApp?.BackButton.onClick(async () => {
+          // Leave room when going back
+          await fetch(url, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              action: "leave",
+              playerId,
+            }),
+          })
+
+          setCurrentScreen("lobby")
+          setSelectedRoom(null)
+          webApp?.BackButton.hide()
+          fetchRooms()
+        })
+      } else {
+        webApp?.showAlert(data.error || "Failed to join room")
+      }
+    } catch (error) {
+      console.error("Failed to join room:", error)
+      webApp?.showAlert("Failed to join room. Please try again.")
+    } finally {
+      setConnectingRoomId(null)
+    }
+  }
+
+  // Configure main button
+  useEffect(() => {
+    if (webApp && currentScreen === "lobby") {
+      webApp.MainButton.setParams({
+        text: "🔄 Refresh Rooms",
+        color: "#3b82f6",
+        text_color: "#ffffff",
+        is_visible: true,
+        is_active: true,
+      })
+
+      webApp.MainButton.onClick(() => {
+        handleRefresh()
+        webApp.HapticFeedback.impactOccurred("light")
+      })
+
+      return () => {
+        webApp.MainButton.hide()
       }
     }
+  }, [webApp, handleRefresh, currentScreen])
 
-    // Ensure we have valid room data
-    const validRooms = rooms.filter(
-      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number",
-    )
+  const tabs = ["Stake", "Active", "Players", "Derash", "Play"]
 
-    console.log("📊 Valid rooms:", validRooms.length)
-
-    const roomSummaries: GameRoomSummary[] = validRooms.map((room) => ({
-      id: room.id,
-      stake: room.stake,
-      players: Array.isArray(room.players) ? room.players.length : 0,
-      maxPlayers: room.maxPlayers || 100,
-      status: room.status || "waiting",
-      prize: (Array.isArray(room.players) ? room.players.length : 0) * room.stake,
-      createdAt:
-        room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
-      activeGames: room.activeGames || 0,
-      hasBonus: room.hasBonus !== false,
-      gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
-      calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
-      currentNumber: room.currentNumber,
-    }))
-
-    const totalPlayers = roomSummaries.reduce((sum, room) => sum + room.players, 0)
-
-    console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalPlayers, "total players")
-
-    return NextResponse.json(
-      {
-        success: true,
-        rooms: roomSummaries,
-        totalPlayers,
-        timestamp: new Date().toISOString(),
-      },
-      {
-        headers: corsHeaders,
-      },
-    )
-  } catch (error) {
-    console.error("❌ Error in GET /api/rooms:", error)
-
-    // Return a minimal fallback response instead of failing completely
-    const fallbackRooms: GameRoomSummary[] = [
-      {
-        id: "room-fallback-10",
-        stake: 10,
-        players: 0,
-        maxPlayers: 100,
-        status: "waiting",
-        prize: 0,
-        createdAt: new Date().toISOString(),
-        activeGames: 0,
-        hasBonus: true,
-        calledNumbers: [],
-        currentNumber: undefined,
-      },
-    ]
-
-    return NextResponse.json(
-      {
-        success: true,
-        rooms: fallbackRooms,
-        totalPlayers: 0,
-        timestamp: new Date().toISOString(),
-        fallback: true,
-        error: error instanceof Error ? error.message : "Unknown error",
-        message: "Using fallback data due to server issues",
-      },
-      {
-        status: 200, // Return 200 instead of 500 to avoid breaking the UI
-        headers: corsHeaders,
-      },
+  if (!isReady) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-blue-600 via-blue-700 to-blue-800 flex items-center justify-center">
+        <div className="text-white text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-white mx-auto mb-4"></div>
+          <p>Loading Arada Bingo...</p>
+        </div>
+      </div>
     )
   }
-}
 
-export async function POST(request: Request) {
-  try {
-    const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
-    const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
-
-    console.log("🚀 POST /api/rooms called with action:", action)
-
-    // Rate limiting
-    const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
-    if (!canProceed) {
-      return NextResponse.json(
-        {
-          success: false,
-          error: "Rate limit exceeded",
-        },
-        {
-          status: 429,
-          headers: corsHeaders,
-        },
-      )
-    }
-
-    await initializeRooms()
-
-    switch (action) {
-      case "join":
-        if (!roomId) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Room ID required",
-            },
-            {
-              status: 400,
-              headers: corsHeaders,
-            },
-          )
-        }
-
-        const room = await GameStateManager.getRoom(roomId)
-        if (!room) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Room not found",
-            },
-            {
-              status: 404,
-              headers: corsHeaders,
-            },
-          )
-        }
-
-        if ((room.players?.length || 0) >= room.maxPlayers) {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Room is full",
-            },
-            {
-              status: 400,
-              headers: corsHeaders,
-            },
-          )
-        }
-
-        if (room.status !== "waiting") {
-          return NextResponse.json(
-            {
-              success: false,
-              error: "Game already started",
-            },
-            {
-              status: 400,
-              headers: corsHeaders,
-            },
-          )
-        }
-
-        // Check if player is already in this room
-        const existingPlayer = room.players?.find((p: Player) => p.id === playerId)
-        if (existingPlayer) {
-          return NextResponse.json(
-            {
-              success: true,
-              room,
-              message: "Already in room",
-            },
-            {
-              headers: corsHeaders,
-            },
-          )
-        }
-
-        // Remove player from other rooms first
-        const currentRoomId = await GameStateManager.getPlayerSession(playerId)
-        if (currentRoomId && currentRoomId !== roomId) {
-          const currentRoom = await GameStateManager.getRoom(currentRoomId as string)
-          if (currentRoom) {
-            currentRoom.players = currentRoom.players?.filter((p: Player) => p.id !== playerId) || []
-            currentRoom.prize = (currentRoom.players?.length || 0) * currentRoom.stake
-            await GameStateManager.setRoom(currentRoomId as string, currentRoom)
-          }
-        }
-
-        // Add player to new room
-        const player: Player = {
-          id: playerId,
-          name: playerData?.name || "Guest Player",
-          telegramId: playerData?.telegramId,
-          joinedAt: new Date(),
-        }
-
-        room.players = room.players || []
-        room.players.push(player)
-        room.prize = room.players.length * room.stake
-
-        // Auto-start logic
-        const minPlayers = 2
-        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10)
-
-        if (room.players.length >= minPlayers && room.players.length >= autoStartThreshold) {
-          room.status = "starting"
-
-          // Schedule game start
-          setTimeout(async () => {
-            const currentRoom = await GameStateManager.getRoom(roomId)
-            if (currentRoom && currentRoom.status === "starting") {
-              currentRoom.status = "active"
-              currentRoom.gameStartTime = new Date()
-              currentRoom.activeGames = 1
-              await GameStateManager.setRoom(roomId, currentRoom)
-
-              // Start auto number calling
-              await GameStateManager.scheduleNumberCalling(roomId)
-            }
-          }, 10000)
-        }
-
-        await GameStateManager.setRoom(roomId, room)
-        await GameStateManager.setPlayerSession(playerId, roomId)
-
-        return NextResponse.json(
-          {
-            success: true,
-            room,
-            message: "Joined room successfully",
-          },
-          {
-            headers: corsHeaders,
-          },
-        )
-
-      case "leave":
-        const playerRoomId = await GameStateManager.getPlayerSession(playerId)
-        if (playerRoomId) {
-          const playerRoom = await GameStateManager.getRoom(playerRoomId as string)
-          if (playerRoom) {
-            playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
-            playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
-
-            // Reset room if empty
-            if (playerRoom.players.length === 0) {
-              playerRoom.status = "waiting"
-              playerRoom.activeGames = 0
-              playerRoom.calledNumbers = []
-              playerRoom.currentNumber = undefined
-            }
-
-            await GameStateManager.setRoom(playerRoomId as string, playerRoom)
-          }
-        }
-
-        await GameStateManager.removePlayerSession(playerId)
-
-        return NextResponse.json(
-          {
-            success: true,
-            message: "Left room successfully",
-          },
-          {
-            headers: corsHeaders,
-          },
-        )
-
-      default:
-        return NextResponse.json(
-          {
-            success: false,
-            error: "Invalid action",
-          },
-          {
-            status: 400,
-            headers: corsHeaders,
-          },
-        )
-    }
-  } catch (error) {
-    console.error("❌ Error handling room action:", error)
-    return NextResponse.json(
-      {
-        success: false,
-        error: "Internal server error",
-        details: error instanceof Error ? error.message : "Unknown error",
-      },
-      {
-        status: 500,
-        headers: corsHeaders,
-      },
-    )
+  if (currentScreen === "game" && selectedRoom) {
+    return <GameScreen room={selectedRoom} onBack={() => setCurrentScreen("lobby")} />
   }
+
+  return (
+    <div className="min-h-screen bg-gradient-to-b from-blue-600 via-blue-700 to-blue-800">
+      {/* Header */}
+      <div className="flex items-center justify-between p-4 bg-black/20">
+        <div className="flex items-center gap-2">
+          <div className="bg-black px-3 py-1 rounded">
+            <span className="text-yellow-400 font-bold text-lg">📺 SETB</span>
+          </div>
+          {user && (
+            <div className="flex items-center gap-2 text-white text-sm">
+              <User className="h-4 w-4" />
+              <span>Hi, {user.first_name}!</span>
+            </div>
+          )}
+        </div>
+        <div className="flex items-center gap-2">
+          <Badge className="bg-green-500 text-white">
+            <Zap className="h-3 w-3 mr-1" />
+            {totalPlayers} Online
+          </Badge>
+          <Button
+            onClick={handleRefresh}
+            variant="secondary"
+            className="bg-gray-600 hover:bg-gray-700 text-white border-0"
+            disabled={isLoading}
+          >
+            <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
+            Refresh
+          </Button>
+        </div>
+      </div>
+
+      {/* Navigation Tabs */}
+      <div className="bg-orange-500 px-4 py-2">
+        <div className="flex gap-6">
+          {tabs.map((tab) => (
+            <button
+              key={tab}
+              onClick={() => {
+                setActiveTab(tab)
+                webApp?.HapticFeedback.selectionChanged()
+              }}
+              className={`text-white font-medium py-2 px-1 border-b-2 transition-colors ${
+                activeTab === tab ? "border-white" : "border-transparent hover:border-white/50"
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Debug Info - Show in development */}
+      {process.env.NODE_ENV === "development" && (
+        <div className="bg-yellow-500 text-black p-2 text-xs">
+          <div>Environment: {process.env.NODE_ENV}</div>
+          <div>App URL: {process.env.NEXT_PUBLIC_APP_URL || "Not set"}</div>
+          <div>Is Telegram: {webApp ? "Yes" : "No"}</div>
+          <div>User ID: {user?.id || "None"}</div>
+          <div>Rooms loaded: {gameRooms.length}</div>
+          {error && <div className="text-red-600">Error: {error}</div>}
+        </div>
+      )}
+
+      {/* Game Rooms */}
+      <div className="p-4 space-y-3">
+        {isLoading ? (
+          <div className="text-center text-white/70 py-8">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white mx-auto mb-4"></div>
+            <p>Loading rooms...</p>
+          </div>
+        ) : error ? (
+          <div className="text-center text-white/70 py-8">
+            <div className="bg-red-500/20 border border-red-500 rounded-lg p-4 mb-4">
+              <p className="text-red-300 font-medium">Failed to load rooms</p>
+              <p className="text-red-200 text-sm mt-1">{error}</p>
+            </div>
+            <Button onClick={handleRefresh} className="bg-orange-500 hover:bg-orange-600">
+              Try Again
+            </Button>
+          </div>
+        ) : gameRooms.length === 0 ? (
+          <div className="text-center text-white/70 py-8">
+            <p>No rooms available. Try refreshing!</p>
+            <Button onClick={handleRefresh} className="mt-4 bg-orange-500 hover:bg-orange-600">
+              Refresh Rooms
+            </Button>
+          </div>
+        ) : (
+          gameRooms.map((room) => {
+            const isConnecting = connectingRoomId === room.id
+
+            return (
+              <div
+                key={room.id}
+                className="relative bg-blue-800/50 backdrop-blur-sm border border-blue-600/30 rounded-lg p-4"
+              >
+                {/* Status Indicators */}
+                <div className="absolute top-2 right-2 flex gap-2">
+                  {room.status === "active" && (
+                    <Badge className="bg-red-500 hover:bg-red-600 text-white text-xs">
+                      <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
+                      Live
+                    </Badge>
+                  )}
+                  {room.status === "starting" && (
+                    <Badge className="bg-yellow-500 hover:bg-yellow-600 text-white text-xs">Starting...</Badge>
+                  )}
+                  {room.hasBonus && (
+                    <Badge className="bg-purple-500 hover:bg-purple-600 text-white text-xs">Bonus</Badge>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-between">
+                  {/* Stake */}
+                  <div className="text-center">
+                    <div className="text-3xl font-bold text-white mb-1">{room.stake}</div>
+                    <div className="text-white/70 text-xs">ETB</div>
+                  </div>
+
+                  {/* Room Status */}
+                  <div className="text-center">
+                    <div className="text-white text-sm">
+                      {room.status === "waiting"
+                        ? "Waiting"
+                        : room.status === "starting"
+                          ? "Starting"
+                          : room.status === "active"
+                            ? "Playing"
+                            : "Finished"}
+                    </div>
+                    <div className="text-white/70 text-xs">
+                      {room.players}/{room.maxPlayers}
+                    </div>
+                  </div>
+
+                  {/* Players */}
+                  <div className="text-center">
+                    <div className="text-2xl font-bold text-white flex items-center gap-1">
+                      <Users className="h-5 w-5" />
+                      {room.players}
+                    </div>
+                    <div className="text-white/70 text-xs">Players</div>
+                  </div>
+
+                  {/* Prize */}
+                  <div className="text-center">
+                    <div className="text-xl font-bold text-white flex items-center gap-1">
+                      <Coins className="h-5 w-5 text-yellow-400" />
+                      {room.prize}
+                    </div>
+                    <div className="text-white/70 text-xs">Prize</div>
+                  </div>
+
+                  {/* Play Button */}
+                  <div>
+                    <Button
+                      onClick={() => handlePlay(room)}
+                      disabled={isConnecting || room.status !== "waiting" || room.players >= room.maxPlayers}
+                      className="bg-gray-600 hover:bg-gray-700 disabled:bg-gray-500 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
+                    >
+                      {isConnecting
+                        ? "Joining..."
+                        : room.players >= room.maxPlayers
+                          ? "Full"
+                          : room.status !== "waiting"
+                            ? "Started"
+                            : "Play"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            )
+          })
+        )}
+      </div>
+
+      {/* Footer */}
+      <div className="text-center py-8 text-white/70 text-sm">
+        © Arada Bingo 2024 • {totalPlayers} Players Online
+        <div className="text-xs mt-1">Last updated: {lastUpdate.toLocaleTimeString()}</div>
+        {user && (
+          <div className="mt-2 text-xs">
+            Welcome, {user.first_name} {user.last_name || ""}
+            {user.username && ` (@${user.username})`}
+          </div>
+        )}
+      </div>
+    </div>
+  )
 }
+
+export default Homepage
