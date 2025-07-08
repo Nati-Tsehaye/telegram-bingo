@@ -24,46 +24,28 @@ async function initializeRooms() {
     const existingRooms = await GameStateManager.getAllRooms()
     console.log("📊 Found existing rooms:", existingRooms.length)
 
-    if (existingRooms.length === 0) {
-      console.log("🏗️ Creating default rooms...")
-      const stakes = [10, 20, 50, 100, 200, 500]
-
-      for (const stake of stakes) {
-        const roomId = `room-${stake}`
-        const room: GameRoom = {
-          id: roomId,
-          stake,
-          players: [],
-          maxPlayers: 100,
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date(),
-          activeGames: 0,
-          hasBonus: true,
-        }
-
-        try {
-          console.log(`Creating room: ${roomId}`)
-          await GameStateManager.setRoom(roomId, room)
-          console.log(`✅ Created room: ${roomId}`)
-        } catch (error) {
-          console.error(`❌ Failed to create room ${roomId}:`, error)
-          // Don't throw here, continue with other rooms
-        }
-      }
-      console.log("🎉 Room creation process completed!")
-    } else {
-      console.log("✅ Using existing rooms")
+    // If we have rooms, just return - don't try to create more
+    if (existingRooms.length > 0) {
+      console.log("✅ Using existing rooms, skipping initialization")
+      return
     }
 
-    // Verify we have at least some rooms
-    const finalRooms = await GameStateManager.getAllRooms()
-    if (finalRooms.length === 0) {
-      console.log("⚠️ No rooms available, creating minimal set...")
-      // Create just one room as fallback
-      const fallbackRoom: GameRoom = {
-        id: "room-10",
-        stake: 10,
+    console.log("🏗️ Creating default rooms...")
+    const stakes = [10, 20, 50, 100, 200, 500]
+
+    for (const stake of stakes) {
+      const roomId = `room-${stake}`
+
+      // Check if this specific room already exists
+      const existingRoom = await GameStateManager.getRoom(roomId)
+      if (existingRoom) {
+        console.log(`✅ Room ${roomId} already exists, skipping`)
+        continue
+      }
+
+      const room: GameRoom = {
+        id: roomId,
+        stake,
         players: [],
         maxPlayers: 100,
         status: "waiting",
@@ -72,11 +54,21 @@ async function initializeRooms() {
         activeGames: 0,
         hasBonus: true,
       }
-      await GameStateManager.setRoom("room-10", fallbackRoom)
+
+      try {
+        console.log(`Creating room: ${roomId}`)
+        await GameStateManager.setRoom(roomId, room)
+        console.log(`✅ Created room: ${roomId}`)
+      } catch (error) {
+        console.error(`❌ Failed to create room ${roomId}:`, error)
+        // Don't throw here, continue with other rooms
+      }
     }
+    console.log("🎉 Room creation process completed!")
   } catch (error) {
     console.error("❌ Error initializing rooms:", error)
-    throw error
+    // Don't throw the error, just log it and continue
+    console.log("⚠️ Continuing with existing rooms despite initialization error")
   }
 }
 
@@ -108,12 +100,53 @@ export async function GET(request: Request) {
       )
     }
 
-    console.log("🔧 Initializing rooms...")
-    await initializeRooms()
+    // Try to initialize rooms, but don't fail if it doesn't work
+    try {
+      console.log("🔧 Initializing rooms...")
+      await initializeRooms()
+    } catch (error) {
+      console.error("⚠️ Room initialization failed, but continuing:", error)
+    }
 
     console.log("📋 Fetching all rooms...")
     const rooms = await GameStateManager.getAllRooms()
     console.log("📊 Total rooms found:", rooms.length)
+
+    // If no rooms exist, create a minimal fallback room
+    if (rooms.length === 0) {
+      console.log("🆘 No rooms found, creating emergency fallback room...")
+      try {
+        const fallbackRoom: GameRoom = {
+          id: "room-emergency-10",
+          stake: 10,
+          players: [],
+          maxPlayers: 100,
+          status: "waiting",
+          prize: 0,
+          createdAt: new Date(),
+          activeGames: 0,
+          hasBonus: true,
+        }
+        await GameStateManager.setRoom("room-emergency-10", fallbackRoom)
+        rooms.push(fallbackRoom)
+        console.log("✅ Created emergency fallback room")
+      } catch (error) {
+        console.error("❌ Failed to create emergency room:", error)
+        // Return empty rooms list instead of failing
+        return NextResponse.json(
+          {
+            success: true,
+            rooms: [],
+            totalPlayers: 0,
+            timestamp: new Date().toISOString(),
+            message: "No rooms available, please try again later",
+          },
+          {
+            headers: corsHeaders,
+          },
+        )
+      }
+    }
 
     // Ensure we have valid room data
     const validRooms = rooms.filter(
