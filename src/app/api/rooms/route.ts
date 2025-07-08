@@ -10,7 +10,7 @@ const corsHeaders = {
   "Access-Control-Max-Age": "86400",
 }
 
-// Initialize default rooms in Redis if they don't exist
+// Simplified room initialization that's less likely to fail
 async function initializeRooms() {
   try {
     console.log("🔍 Checking for existing rooms...")
@@ -18,82 +18,55 @@ async function initializeRooms() {
     // First test Redis connection
     const isConnected = await GameStateManager.testConnection()
     if (!isConnected) {
-      throw new Error("Redis connection failed")
+      console.error("❌ Redis connection failed")
+      return false
     }
 
     const existingRooms = await GameStateManager.getAllRooms()
     console.log("📊 Found existing rooms:", existingRooms.length)
 
-    // If we have rooms, just return - don't try to create more
+    // If we have rooms, just return success
     if (existingRooms.length > 0) {
       console.log("✅ Using existing rooms, skipping initialization")
-      return
+      return true
     }
 
     console.log("🏗️ Creating default rooms...")
-    const stakes = [10, 20, 50, 100, 200, 500]
+    const stakes = [10, 20, 50, 100]
 
+    let successCount = 0
     for (const stake of stakes) {
       const roomId = `room-${stake}`
 
-      // Check if this specific room already exists
-      const existingRoom = await GameStateManager.getRoom(roomId)
-      if (existingRoom) {
-        console.log(`✅ Room ${roomId} already exists, skipping`)
-        continue
-      }
-
-      // Create room with more robust data structure
-      const room: GameRoom = {
-        id: roomId,
-        stake: stake,
-        players: [], // Start with empty array
-        maxPlayers: 100,
-        status: "waiting",
-        prize: 0,
-        createdAt: new Date(),
-        activeGames: 0,
-        hasBonus: true,
-      }
-
       try {
-        console.log(`Creating room: ${roomId} with stake: ${stake}`)
-
-        // Validate room data before setting
-        if (!room.id || !room.stake || room.stake <= 0) {
-          throw new Error(`Invalid room data: id=${room.id}, stake=${room.stake}`)
+        // Create minimal room object
+        const room: GameRoom = {
+          id: roomId,
+          stake: stake,
+          players: [],
+          maxPlayers: 100,
+          status: "waiting",
+          prize: 0,
+          createdAt: new Date(),
+          activeGames: 0,
+          hasBonus: true,
         }
 
+        console.log(`Creating room: ${roomId}`)
         await GameStateManager.setRoom(roomId, room)
         console.log(`✅ Created room: ${roomId}`)
+        successCount++
       } catch (error) {
         console.error(`❌ Failed to create room ${roomId}:`, error)
-        // Don't throw here, continue with other rooms
-        // But create a minimal fallback room
-        try {
-          const fallbackRoom: GameRoom = {
-            id: `${roomId}-fallback`,
-            stake: stake,
-            players: [],
-            maxPlayers: 100,
-            status: "waiting",
-            prize: 0,
-            createdAt: new Date(),
-            activeGames: 0,
-            hasBonus: true,
-          }
-          await GameStateManager.setRoom(`${roomId}-fallback`, fallbackRoom)
-          console.log(`✅ Created fallback room: ${roomId}-fallback`)
-        } catch (fallbackError) {
-          console.error(`❌ Failed to create fallback room:`, fallbackError)
-        }
+        // Continue with other rooms instead of failing completely
       }
     }
-    console.log("🎉 Room creation process completed!")
+
+    console.log(`🎉 Room creation completed! Created ${successCount}/${stakes.length} rooms`)
+    return successCount > 0
   } catch (error) {
     console.error("❌ Error initializing rooms:", error)
-    // Don't throw the error, just log it and continue
-    console.log("⚠️ Continuing with existing rooms despite initialization error")
+    return false
   }
 }
 
@@ -125,24 +98,25 @@ export async function GET(request: Request) {
       )
     }
 
-    // Try to initialize rooms, but don't fail if it doesn't work
-    try {
-      console.log("🔧 Initializing rooms...")
-      await initializeRooms()
-    } catch (error) {
-      console.error("⚠️ Room initialization failed, but continuing:", error)
+    // Try to initialize rooms
+    console.log("🔧 Initializing rooms...")
+    const initSuccess = await initializeRooms()
+
+    if (!initSuccess) {
+      console.error("⚠️ Room initialization failed")
+      // Don't fail completely, try to get existing rooms
     }
 
     console.log("📋 Fetching all rooms...")
     const rooms = await GameStateManager.getAllRooms()
     console.log("📊 Total rooms found:", rooms.length)
 
-    // If no rooms exist, create a minimal fallback room
+    // If still no rooms, create one emergency room
     if (rooms.length === 0) {
-      console.log("🆘 No rooms found, creating emergency fallback room...")
+      console.log("🆘 No rooms found, creating emergency room...")
       try {
-        const fallbackRoom: GameRoom = {
-          id: "room-emergency-10",
+        const emergencyRoom: GameRoom = {
+          id: "emergency-room-10",
           stake: 10,
           players: [],
           maxPlayers: 100,
@@ -152,19 +126,21 @@ export async function GET(request: Request) {
           activeGames: 0,
           hasBonus: true,
         }
-        await GameStateManager.setRoom("room-emergency-10", fallbackRoom)
-        rooms.push(fallbackRoom)
-        console.log("✅ Created emergency fallback room")
+
+        await GameStateManager.setRoom("emergency-room-10", emergencyRoom)
+        rooms.push(emergencyRoom)
+        console.log("✅ Created emergency room")
       } catch (error) {
         console.error("❌ Failed to create emergency room:", error)
-        // Return empty rooms list instead of failing
+
+        // Return a response indicating no rooms are available
         return NextResponse.json(
           {
             success: true,
             rooms: [],
             totalPlayers: 0,
             timestamp: new Date().toISOString(),
-            message: "No rooms available, please try again later",
+            message: "No rooms available. Please try refreshing.",
           },
           {
             headers: corsHeaders,
@@ -173,9 +149,9 @@ export async function GET(request: Request) {
       }
     }
 
-    // Ensure we have valid room data
+    // Filter and validate rooms
     const validRooms = rooms.filter(
-      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number",
+      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number" && room.stake > 0,
     )
 
     console.log("📊 Valid rooms:", validRooms.length)
@@ -249,8 +225,6 @@ export async function POST(request: Request) {
         },
       )
     }
-
-    await initializeRooms()
 
     switch (action) {
       case "join":
@@ -333,7 +307,7 @@ export async function POST(request: Request) {
           }
         }
 
-        // Create player with robust data handling for Telegram environment
+        // Create player with robust data handling
         const player: Player = {
           id: playerId || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
           name: (playerData?.name || `Player ${Date.now().toString().slice(-4)}`).trim() || "Guest Player",
@@ -362,26 +336,32 @@ export async function POST(request: Request) {
           telegramId: player.telegramId,
         })
 
-        room.players = room.players || []
-        room.players.push(player)
-        room.prize = room.players.length * room.stake
+        // Create a new room object with the player added
+        const updatedRoom: GameRoom = {
+          ...room,
+          players: [...(room.players || []), player],
+        }
+        updatedRoom.prize = updatedRoom.players.length * updatedRoom.stake
 
         // Auto-start logic
         const minPlayers = 2
-        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10)
+        const autoStartThreshold = Math.min(updatedRoom.maxPlayers * 0.1, 10)
 
-        if (room.players.length >= minPlayers && room.players.length >= autoStartThreshold) {
-          room.status = "starting"
+        if (updatedRoom.players.length >= minPlayers && updatedRoom.players.length >= autoStartThreshold) {
+          updatedRoom.status = "starting"
 
           // Schedule game start
           setTimeout(async () => {
             try {
               const currentRoom = await GameStateManager.getRoom(roomId)
               if (currentRoom && currentRoom.status === "starting") {
-                currentRoom.status = "active"
-                currentRoom.gameStartTime = new Date()
-                currentRoom.activeGames = 1
-                await GameStateManager.setRoom(roomId, currentRoom)
+                const startedRoom: GameRoom = {
+                  ...currentRoom,
+                  status: "active",
+                  gameStartTime: new Date(),
+                  activeGames: 1,
+                }
+                await GameStateManager.setRoom(roomId, startedRoom)
 
                 // Start auto number calling
                 await GameStateManager.scheduleNumberCalling(roomId)
@@ -393,13 +373,13 @@ export async function POST(request: Request) {
         }
 
         try {
-          await GameStateManager.setRoom(roomId, room)
+          await GameStateManager.setRoom(roomId, updatedRoom)
           await GameStateManager.setPlayerSession(playerId, roomId)
 
           return NextResponse.json(
             {
               success: true,
-              room,
+              room: updatedRoom,
               message: "Joined room successfully",
             },
             {
@@ -426,18 +406,21 @@ export async function POST(request: Request) {
         if (playerRoomId) {
           const playerRoom = await GameStateManager.getRoom(playerRoomId as string)
           if (playerRoom) {
-            playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
-            playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
+            const updatedPlayerRoom: GameRoom = {
+              ...playerRoom,
+              players: playerRoom.players?.filter((p: Player) => p.id !== playerId) || [],
+            }
+            updatedPlayerRoom.prize = updatedPlayerRoom.players.length * updatedPlayerRoom.stake
 
             // Reset room if empty
-            if (playerRoom.players.length === 0) {
-              playerRoom.status = "waiting"
-              playerRoom.activeGames = 0
-              playerRoom.calledNumbers = []
-              playerRoom.currentNumber = undefined
+            if (updatedPlayerRoom.players.length === 0) {
+              updatedPlayerRoom.status = "waiting"
+              updatedPlayerRoom.activeGames = 0
+              updatedPlayerRoom.calledNumbers = []
+              updatedPlayerRoom.currentNumber = undefined
             }
 
-            await GameStateManager.setRoom(playerRoomId as string, playerRoom)
+            await GameStateManager.setRoom(playerRoomId as string, updatedPlayerRoom)
           }
         }
 

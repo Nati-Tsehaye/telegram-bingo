@@ -27,6 +27,9 @@ export const redis = new Redis({
 
 // Game state management with Redis
 export class GameStateManager {
+  // Expose redis instance for debugging
+  static redis = redis
+
   // Store game state in Redis with TTL
   static async setGameState(roomId: string, state: unknown) {
     try {
@@ -176,128 +179,81 @@ export class GameStateManager {
     }
   }
 
-  // Room management - Now properly typed to accept GameRoom with better error handling
+  // Simplified and more robust room management
   static async setRoom(roomId: string, room: GameRoom) {
     try {
       console.log(`🏠 Setting room ${roomId}...`)
 
-      // Validate required fields with better defaults
-      if (!room.id && !roomId) {
-        throw new Error(`Invalid room data: missing room ID`)
+      // Basic validation
+      if (!roomId || typeof roomId !== "string") {
+        throw new Error(`Invalid room ID: ${roomId}`)
+      }
+
+      if (!room || typeof room !== "object") {
+        throw new Error(`Invalid room object`)
       }
 
       if (!room.stake || typeof room.stake !== "number" || room.stake <= 0) {
-        throw new Error(`Invalid room data: invalid stake value`)
+        throw new Error(`Invalid stake: ${room.stake}`)
       }
 
-      // Ensure the room object is properly serializable with safe defaults
-      const roomData = {
-        id: String(room.id || roomId),
-        stake: Number(room.stake || 0),
-        players: Array.isArray(room.players)
-          ? room.players.map((player) => {
-              // More robust player data handling for Telegram environment
-              const playerId = String(player.id || `guest-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`)
-              const playerName = String(player.name || player.telegramId || "Guest Player").trim()
-
-              return {
-                id: playerId,
-                name: playerName || "Guest Player", // Ensure name is never empty
-                telegramId:
-                  player.telegramId && !isNaN(Number(player.telegramId)) ? Number(player.telegramId) : undefined,
-                avatar: player.avatar && typeof player.avatar === "string" ? String(player.avatar).trim() : undefined,
-                joinedAt: (() => {
-                  try {
-                    if (player.joinedAt instanceof Date) {
-                      return player.joinedAt.toISOString()
-                    } else if (typeof player.joinedAt === "string" && player.joinedAt) {
-                      return new Date(player.joinedAt).toISOString()
-                    } else {
-                      return new Date().toISOString()
-                    }
-                  } catch {
-                    return new Date().toISOString()
-                  }
-                })(),
-              }
-            })
-          : [],
-        maxPlayers: Math.max(1, Number(room.maxPlayers || 100)),
-        status: ["waiting", "starting", "active", "finished"].includes(String(room.status))
-          ? String(room.status)
-          : "waiting",
-        prize: Math.max(0, Number(room.prize || 0)),
-        activeGames: Math.max(0, Number(room.activeGames || 0)),
+      // Create a clean, serializable room object with minimal required fields
+      const cleanRoom = {
+        id: String(roomId),
+        stake: Number(room.stake),
+        players: [], // Always start with empty players array to avoid serialization issues
+        maxPlayers: Number(room.maxPlayers || 100),
+        status: String(room.status || "waiting"),
+        prize: Number(room.prize || 0),
+        activeGames: Number(room.activeGames || 0),
         hasBonus: Boolean(room.hasBonus !== false),
-        createdAt: (() => {
-          try {
-            if (room.createdAt instanceof Date) {
-              return room.createdAt.toISOString()
-            } else if (typeof room.createdAt === "string" && room.createdAt) {
-              return new Date(room.createdAt).toISOString()
-            } else {
-              return new Date().toISOString()
-            }
-          } catch {
-            return new Date().toISOString()
-          }
-        })(),
-        gameStartTime: (() => {
-          try {
-            if (room.gameStartTime instanceof Date) {
-              return room.gameStartTime.toISOString()
-            } else if (typeof room.gameStartTime === "string" && room.gameStartTime) {
-              return new Date(room.gameStartTime).toISOString()
-            } else {
-              return undefined
-            }
-          } catch {
-            return undefined
-          }
-        })(),
-        calledNumbers: Array.isArray(room.calledNumbers)
-          ? room.calledNumbers.filter((n) => !isNaN(Number(n))).map((n) => Number(n))
-          : [],
-        currentNumber:
-          room.currentNumber && !isNaN(Number(room.currentNumber)) ? Number(room.currentNumber) : undefined,
+        createdAt: new Date().toISOString(),
+        gameStartTime: undefined,
+        calledNumbers: [],
+        currentNumber: undefined,
       }
 
-      console.log(`📝 Room data prepared for ${roomId}:`, {
-        id: roomData.id,
-        stake: roomData.stake,
-        playersCount: roomData.players.length,
-        status: roomData.status,
-        validPlayers: roomData.players.every((p) => p.id && p.name),
+      console.log(`📝 Clean room data for ${roomId}:`, {
+        id: cleanRoom.id,
+        stake: cleanRoom.stake,
+        status: cleanRoom.status,
+        maxPlayers: cleanRoom.maxPlayers,
       })
 
-      // Validate final room data
-      if (!roomData.id || !roomData.stake || roomData.stake <= 0) {
-        throw new Error(`Invalid processed room data: id=${roomData.id}, stake=${roomData.stake}`)
+      // Test serialization
+      const serialized = JSON.stringify(cleanRoom)
+      console.log(`💾 Serialized size: ${serialized.length} chars`)
+
+      // Test deserialization
+      const parsed = JSON.parse(serialized)
+      if (!parsed.id || !parsed.stake) {
+        throw new Error("Serialization test failed")
       }
 
-      // Test Redis connection before attempting to set
-      const connectionTest = await this.testConnection()
-      if (!connectionTest) {
-        throw new Error("Redis connection test failed")
+      // Store in Redis with shorter TTL for testing
+      await redis.setex(`room:${roomId}`, 3600, serialized) // 1 hour TTL
+      console.log(`✅ Successfully stored room ${roomId}`)
+
+      // Verify storage by reading back
+      const verification = await redis.get(`room:${roomId}`)
+      if (!verification) {
+        throw new Error("Room verification failed - could not read back")
       }
 
-      // Use setex with string serialization to avoid type issues
-      const serializedRoom = JSON.stringify(roomData)
-      console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
-
-      // Validate JSON serialization
-      try {
-        JSON.parse(serializedRoom) // Test if it can be parsed back
-      } catch (error) {
-        throw new Error(`Room data serialization failed: ${error instanceof Error ? error.message : "Unknown error"}`)
-      }
-
-      await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
-      console.log(`✅ Successfully set room ${roomId}`)
+      console.log(`✅ Room ${roomId} verified in Redis`)
     } catch (error) {
       console.error(`❌ Error setting room ${roomId}:`, error)
-      console.error(`Room data:`, JSON.stringify(room, null, 2))
-      throw new Error(`Failed to set room: ${error instanceof Error ? error.message : "Unknown error"}`)
+      console.error(`Room data type:`, typeof room)
+      console.error(`Room keys:`, room ? Object.keys(room) : "null")
+
+      // Log the actual error details
+      if (error instanceof Error) {
+        console.error(`Error name: ${error.name}`)
+        console.error(`Error message: ${error.message}`)
+        console.error(`Error stack: ${error.stack}`)
+      }
+
+      throw new Error(`Failed to set room ${roomId}: ${error instanceof Error ? error.message : "Unknown error"}`)
     }
   }
 
