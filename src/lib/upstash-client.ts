@@ -186,21 +186,39 @@ export class GameStateManager {
         throw new Error(`Invalid room data: missing id or stake`)
       }
 
-      // Ensure the room object is properly serializable
+      // Ensure the room object is properly serializable - convert to plain object
       const roomData = {
-        id: room.id || roomId,
-        stake: room.stake || 0,
-        players: Array.isArray(room.players) ? room.players : [],
-        maxPlayers: room.maxPlayers || 100,
-        status: room.status || "waiting",
-        prize: room.prize || 0,
-        activeGames: room.activeGames || 0,
-        hasBonus: room.hasBonus !== false,
+        id: String(room.id || roomId),
+        stake: Number(room.stake || 0),
+        players: Array.isArray(room.players)
+          ? room.players.map((player) => ({
+              id: String(player.id),
+              name: String(player.name || "Guest"),
+              telegramId: player.telegramId ? Number(player.telegramId) : undefined,
+              avatar: player.avatar ? String(player.avatar) : undefined,
+              joinedAt:
+                player.joinedAt instanceof Date
+                  ? player.joinedAt.toISOString()
+                  : String(player.joinedAt || new Date().toISOString()),
+            }))
+          : [],
+        maxPlayers: Number(room.maxPlayers || 100),
+        status: String(room.status || "waiting"),
+        prize: Number(room.prize || 0),
+        activeGames: Number(room.activeGames || 0),
+        hasBonus: Boolean(room.hasBonus !== false),
         createdAt:
-          room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
-        gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
-        calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
-        currentNumber: room.currentNumber,
+          room.createdAt instanceof Date
+            ? room.createdAt.toISOString()
+            : String(room.createdAt || new Date().toISOString()),
+        gameStartTime:
+          room.gameStartTime instanceof Date
+            ? room.gameStartTime.toISOString()
+            : room.gameStartTime
+              ? String(room.gameStartTime)
+              : undefined,
+        calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers.map((n) => Number(n)) : [],
+        currentNumber: room.currentNumber ? Number(room.currentNumber) : undefined,
       }
 
       console.log(`📝 Room data prepared for ${roomId}:`, {
@@ -210,14 +228,15 @@ export class GameStateManager {
         status: roomData.status,
       })
 
-      const serializedRoom = JSON.stringify(roomData)
-      console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
-
       // Test Redis connection before attempting to set
       const connectionTest = await this.testConnection()
       if (!connectionTest) {
         throw new Error("Redis connection test failed")
       }
+
+      // Use setex with string serialization to avoid type issues
+      const serializedRoom = JSON.stringify(roomData)
+      console.log(`💾 Serialized room size: ${serializedRoom.length} characters`)
 
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
@@ -241,12 +260,20 @@ export class GameStateManager {
         roomData = data // Already parsed by Upstash client
       }
 
-      // Convert date strings back to Date objects if needed
+      // Convert date strings back to Date objects and ensure proper types
       if (roomData.createdAt && typeof roomData.createdAt === "string") {
         roomData.createdAt = new Date(roomData.createdAt)
       }
       if (roomData.gameStartTime && typeof roomData.gameStartTime === "string") {
         roomData.gameStartTime = new Date(roomData.gameStartTime)
+      }
+
+      // Convert player joinedAt back to Date objects
+      if (Array.isArray(roomData.players)) {
+        roomData.players = roomData.players.map((player: any) => ({
+          ...player,
+          joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
+        }))
       }
 
       return roomData as GameRoom
@@ -279,12 +306,20 @@ export class GameStateManager {
               roomData = data // Already parsed by Upstash client
             }
 
-            // Convert date strings back to Date objects if needed
+            // Convert date strings back to Date objects
             if (roomData.createdAt && typeof roomData.createdAt === "string") {
               roomData.createdAt = new Date(roomData.createdAt)
             }
             if (roomData.gameStartTime && typeof roomData.gameStartTime === "string") {
               roomData.gameStartTime = new Date(roomData.gameStartTime)
+            }
+
+            // Convert player joinedAt back to Date objects
+            if (Array.isArray(roomData.players)) {
+              roomData.players = roomData.players.map((player: any) => ({
+                ...player,
+                joinedAt: player.joinedAt ? new Date(player.joinedAt) : new Date(),
+              }))
             }
 
             return roomData as GameRoom
