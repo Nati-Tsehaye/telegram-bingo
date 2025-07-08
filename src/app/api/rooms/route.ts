@@ -40,24 +40,39 @@ async function initializeRooms() {
           createdAt: new Date(),
           activeGames: 0,
           hasBonus: true,
-          gameStartTime: undefined,
-          calledNumbers: [],
-          currentNumber: undefined,
         }
 
         try {
+          console.log(`Creating room: ${roomId}`)
           await GameStateManager.setRoom(roomId, room)
           console.log(`✅ Created room: ${roomId}`)
         } catch (error) {
           console.error(`❌ Failed to create room ${roomId}:`, error)
-          throw new Error(
-            `Failed to create room ${roomId}: ${error instanceof Error ? error.message : "Unknown error"}`,
-          )
+          // Don't throw here, continue with other rooms
         }
       }
-      console.log("🎉 All default rooms created!")
+      console.log("🎉 Room creation process completed!")
     } else {
       console.log("✅ Using existing rooms")
+    }
+
+    // Verify we have at least some rooms
+    const finalRooms = await GameStateManager.getAllRooms()
+    if (finalRooms.length === 0) {
+      console.log("⚠️ No rooms available, creating minimal set...")
+      // Create just one room as fallback
+      const fallbackRoom: GameRoom = {
+        id: "room-10",
+        stake: 10,
+        players: [],
+        maxPlayers: 100,
+        status: "waiting",
+        prize: 0,
+        createdAt: new Date(),
+        activeGames: 0,
+        hasBonus: true,
+      }
+      await GameStateManager.setRoom("room-10", fallbackRoom)
     }
   } catch (error) {
     console.error("❌ Error initializing rooms:", error)
@@ -100,22 +115,29 @@ export async function GET(request: Request) {
     const rooms = await GameStateManager.getAllRooms()
     console.log("📊 Total rooms found:", rooms.length)
 
-    const roomSummaries: GameRoomSummary[] = rooms.map((room) => ({
+    // Ensure we have valid room data
+    const validRooms = rooms.filter(
+      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number",
+    )
+
+    console.log("📊 Valid rooms:", validRooms.length)
+
+    const roomSummaries: GameRoomSummary[] = validRooms.map((room) => ({
       id: room.id,
       stake: room.stake,
-      players: room.players?.length || 0,
-      maxPlayers: room.maxPlayers,
-      status: room.status,
-      prize: (room.players?.length || 0) * room.stake,
-      createdAt: room.createdAt,
+      players: Array.isArray(room.players) ? room.players.length : 0,
+      maxPlayers: room.maxPlayers || 100,
+      status: room.status || "waiting",
+      prize: (Array.isArray(room.players) ? room.players.length : 0) * room.stake,
+      createdAt: room.createdAt || new Date().toISOString(),
       activeGames: room.activeGames || 0,
-      hasBonus: room.hasBonus,
+      hasBonus: room.hasBonus !== false,
       gameStartTime: room.gameStartTime,
-      calledNumbers: room.calledNumbers || [],
+      calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
       currentNumber: room.currentNumber,
     }))
 
-    const totalPlayers = rooms.reduce((sum, room) => sum + (room.players?.length || 0), 0)
+    const totalPlayers = roomSummaries.reduce((sum, room) => sum + room.players, 0)
 
     console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalPlayers, "total players")
 
