@@ -385,7 +385,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   }, [room.id])
 
   // Manual number calling function for testing
-  const callNumberManually = useCallback(async () => {
+  const _callNumberManually = useCallback(async () => {
     try {
       console.log(`🎯 Manually calling number for room: ${room.id}`)
       const response = await fetch("/api/auto-caller", {
@@ -549,8 +549,8 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           [false, false, false, false, false],
         ])
       }
-    } catch (error) {
-      console.error("Failed to reset game:", error)
+    } catch (_error) {
+      console.error("Failed to reset game:", _error)
     } finally {
       setIsLoading(false)
     }
@@ -762,7 +762,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   }
 
   // Test audio function for debugging
-  const testAudio = () => {
+  const _testAudio = () => {
     console.log("🧪 Testing audio with current number:", gameState.currentNumber)
     if (gameState.currentNumber) {
       playNumberAudio(gameState.currentNumber)
