@@ -174,6 +174,9 @@ export async function GET(request: Request) {
     // Run aggressive ghost cleanup - remove ALL guest players except current active ones
     const cleanupResult = await GameStateManager.aggressiveGhostCleanup(currentActivePlayerIds)
     console.log("🔥 Aggressive cleanup result:", cleanupResult)
+    if (cleanupResult.duplicateTelegramUsers > 0) {
+      console.log(`🔄 Removed ${cleanupResult.duplicateTelegramUsers} duplicate Telegram user sessions`)
+    }
 
     // Fetch rooms again after cleanup
     const cleanedRooms = await GameStateManager.getAllRooms()
@@ -346,10 +349,32 @@ export async function POST(request: Request) {
           )
         }
 
-        // Check if player is already in this room
-        const existingPlayer = cleanedRoom.players?.find((p: Player) => p.id === playerId)
-        if (existingPlayer) {
-          console.log("🔄 Player already in room, updating session")
+        // Check if this Telegram user is already in this room (prevent duplicate joins from different devices)
+        let existingPlayer = null
+        if (playerData?.telegramId) {
+          // For Telegram users, check by Telegram ID to prevent duplicate joins from different devices
+          existingPlayer = cleanedRoom.players?.find((p: Player) => p.telegramId === playerData.telegramId)
+          if (existingPlayer && existingPlayer.id !== playerId) {
+            console.log(`🚫 Telegram user ${playerData.telegramId} already in room with different session ID`)
+            console.log(`   Existing: ${existingPlayer.id}, New: ${playerId}`)
+
+            // Remove the old session and replace with new one
+            cleanedRoom.players =
+              cleanedRoom.players?.filter((p: Player) => p.telegramId !== playerData.telegramId) || []
+
+            // Clean up old player session and board selections
+            await GameStateManager.removePlayerSession(existingPlayer.id)
+            await GameStateManager.removePlayerFromAllBoardSelections(existingPlayer.id)
+
+            console.log(`🔄 Replaced old session ${existingPlayer.id} with new session ${playerId}`)
+          }
+        } else {
+          // For guest users, check by player ID as before
+          existingPlayer = cleanedRoom.players?.find((p: Player) => p.id === playerId)
+        }
+
+        if (existingPlayer && existingPlayer.id === playerId) {
+          console.log("🔄 Player already in room with same session, updating session")
           // Update player session to ensure it's tracked
           await GameStateManager.setPlayerSession(playerId, roomId)
           return NextResponse.json(
@@ -366,7 +391,14 @@ export async function POST(request: Request) {
 
         // Remove player from other rooms first (but protect this player ID)
         console.log("🧹 Cleaning up player from other rooms...")
-        await GameStateManager.removePlayerFromAllRooms(playerId)
+        if (playerData?.telegramId) {
+          // For Telegram users, remove all other sessions with same Telegram ID
+          console.log(`🔍 Removing duplicate Telegram sessions for user ${playerData.telegramId}`)
+          await GameStateManager.removePlayerByTelegramId(playerData.telegramId, playerId)
+        } else {
+          // For guest users, use the regular cleanup
+          await GameStateManager.removePlayerFromAllRooms(playerId)
+        }
 
         // Add player to new room
         const player: Player = {

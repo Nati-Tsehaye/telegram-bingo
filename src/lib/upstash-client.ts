@@ -576,6 +576,82 @@ export class GameStateManager {
     }
   }
 
+  // Enhanced method to remove player by Telegram ID from all rooms (prevents duplicate joins)
+  static async removePlayerByTelegramId(telegramId: number, excludePlayerId?: string) {
+    try {
+      console.log(`🧹 Removing all players with Telegram ID ${telegramId} from all rooms...`)
+      if (excludePlayerId) {
+        console.log(`🔒 Excluding player ID: ${excludePlayerId}`)
+      }
+
+      const rooms = await this.getAllRooms()
+      let removedFromRooms = 0
+      const removedPlayerIds: string[] = []
+
+      for (const room of rooms) {
+        if (Array.isArray(room.players)) {
+          const originalPlayerCount = room.players.length
+
+          // Remove players with matching Telegram ID (except the excluded one)
+          const playersToRemove = room.players.filter(
+            (player) => player.telegramId === telegramId && player.id !== excludePlayerId,
+          )
+
+          if (playersToRemove.length > 0) {
+            // Track removed player IDs for cleanup
+            playersToRemove.forEach((player) => removedPlayerIds.push(player.id))
+
+            // Remove the players
+            room.players = room.players.filter(
+              (player) => !(player.telegramId === telegramId && player.id !== excludePlayerId),
+            )
+
+            room.prize = room.players.length * room.stake
+
+            // Reset room if empty or insufficient players
+            if (room.players.length === 0) {
+              room.status = "waiting"
+              room.activeGames = 0
+              room.calledNumbers = []
+              room.currentNumber = undefined
+              room.gameStartTime = undefined
+              await this.resetGameState(room.id)
+            } else if (room.players.length < 2 && room.status !== "waiting") {
+              room.status = "waiting"
+              room.activeGames = 0
+              room.calledNumbers = []
+              room.currentNumber = undefined
+              room.gameStartTime = undefined
+              await this.resetGameState(room.id)
+            }
+
+            await this.setRoom(room.id, room)
+            removedFromRooms++
+
+            console.log(
+              `🏠 Removed ${playersToRemove.length} duplicate players from room ${room.id} (${originalPlayerCount} -> ${room.players.length})`,
+            )
+          }
+        }
+      }
+
+      // Clean up sessions and board selections for removed players
+      for (const playerId of removedPlayerIds) {
+        await this.removePlayerSession(playerId)
+        await this.removePlayerFromAllBoardSelections(playerId)
+        console.log(`🗑️ Cleaned up session and board selections for duplicate player: ${playerId}`)
+      }
+
+      console.log(
+        `✅ Telegram user ${telegramId} duplicates removed from ${removedFromRooms} rooms (${removedPlayerIds.length} duplicate sessions cleaned)`,
+      )
+      return { removedFromRooms, removedPlayerIds }
+    } catch (error) {
+      console.error(`Error removing Telegram user ${telegramId} duplicates:`, error)
+      return { removedFromRooms: 0, removedPlayerIds: [] }
+    }
+  }
+
   // AGGRESSIVE GHOST PLAYER CLEANUP - Remove all guest players except current active ones
   static async aggressiveGhostCleanup(activePlayerIds: Set<string> = new Set()) {
     try {
@@ -641,6 +717,73 @@ export class GameStateManager {
         }
       }
 
+      // Additional cleanup: Remove duplicate Telegram users (same Telegram ID, different sessions)
+      let duplicateTelegramUsers = 0
+      const telegramUserMap = new Map<number, string[]>() // telegramId -> [playerIds]
+
+      for (const room of rooms) {
+        if (Array.isArray(room.players) && room.players.length > 0) {
+          // Group players by Telegram ID
+          room.players.forEach((player) => {
+            if (player.telegramId && typeof player.telegramId === "number") {
+              if (!telegramUserMap.has(player.telegramId)) {
+                telegramUserMap.set(player.telegramId, [])
+              }
+              telegramUserMap.get(player.telegramId)!.push(player.id)
+            }
+          })
+        }
+      }
+
+      // Find and remove duplicate Telegram users (keep the most recent session)
+      for (const [telegramId, playerIds] of telegramUserMap.entries()) {
+        if (playerIds.length > 1) {
+          console.log(`🔍 Found ${playerIds.length} duplicate sessions for Telegram user ${telegramId}:`, playerIds)
+
+          // Keep only the most recent session (last in array, or protected one if exists)
+          const protectedPlayerId = playerIds.find((id) => activePlayerIds.has(id))
+          const playerIdToKeep = protectedPlayerId || playerIds[playerIds.length - 1]
+          const playerIdsToRemove = playerIds.filter((id) => id !== playerIdToKeep)
+
+          console.log(`🔒 Keeping session: ${playerIdToKeep}, removing: [${playerIdsToRemove.join(", ")}]`)
+
+          // Remove duplicate sessions from all rooms
+          for (const room of rooms) {
+            if (Array.isArray(room.players)) {
+              const originalCount = room.players.length
+              room.players = room.players.filter(
+                (player) => !(player.telegramId === telegramId && playerIdsToRemove.includes(player.id)),
+              )
+
+              const removedCount = originalCount - room.players.length
+              if (removedCount > 0) {
+                duplicateTelegramUsers += removedCount
+                room.prize = room.players.length * room.stake
+
+                // Reset room if needed
+                if (room.players.length === 0 && room.status !== "waiting") {
+                  room.status = "waiting"
+                  room.activeGames = 0
+                  room.calledNumbers = []
+                  room.currentNumber = undefined
+                  room.gameStartTime = undefined
+                  await this.resetGameState(room.id)
+                }
+
+                await this.setRoom(room.id, room)
+                console.log(`🧹 Removed ${removedCount} duplicate Telegram sessions from room ${room.id}`)
+              }
+            }
+          }
+
+          // Clean up sessions and board selections for removed duplicates
+          for (const playerId of playerIdsToRemove) {
+            await this.removePlayerSession(playerId)
+            await this.removePlayerFromAllBoardSelections(playerId)
+          }
+        }
+      }
+
       // Also clean up orphaned player sessions for guest players
       const playerSessionKeys = await redis.keys("player:guest-*")
       let cleanedSessions = 0
@@ -688,6 +831,7 @@ export class GameStateManager {
         ghostPlayersRemoved: totalGhostPlayersRemoved,
         sessionsRemoved: cleanedSessions,
         boardSelectionsRemoved: cleanedBoardSelections,
+        duplicateTelegramUsers: duplicateTelegramUsers, // Add this line
       }
     } catch (error) {
       console.error("Error during aggressive ghost cleanup:", error)
@@ -695,6 +839,7 @@ export class GameStateManager {
         ghostPlayersRemoved: 0,
         sessionsRemoved: 0,
         boardSelectionsRemoved: 0,
+        duplicateTelegramUsers: 0,
       }
     }
   }
