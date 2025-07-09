@@ -189,7 +189,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         audio.addEventListener("canplay", playAudio, { once: true })
         audio.addEventListener(
           "error",
-          (error) => {
+          (_error) => {
             console.warn("Error loading BINGO sound, using fallback")
             webApp?.HapticFeedback.notificationOccurred("success")
             playNumberAudio(75)
