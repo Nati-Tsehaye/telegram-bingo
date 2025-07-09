@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 import { GameStateManager } from "@/lib/upstash-client"
 
-// Auto number caller endpoint (called by cron job or scheduler)
+// Manual number caller endpoint (for testing or manual triggers)
 export async function POST(request: Request) {
   try {
     const { roomId } = await request.json()
@@ -10,7 +10,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
-    console.log(`🎯 Auto-caller called for room: ${roomId}`)
+    console.log(`🎯 Manual number call requested for room: ${roomId}`)
 
     // Check if auto calling is still active for this room
     const isActive = await GameStateManager.isNumberCallingActive(roomId)
@@ -39,11 +39,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "All numbers called, game finished" })
     }
 
-    // Call next number
+    // Call next number - this will broadcast to all players
     const newNumber = await GameStateManager.callNextNumber(roomId)
 
     if (newNumber) {
-      console.log(`📢 Auto-called number ${newNumber} for room ${roomId}`)
+      console.log(`📢 Manually called number ${newNumber} for room ${roomId}`)
       return NextResponse.json({
         success: true,
         calledNumber: newNumber,
@@ -55,7 +55,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "No more numbers to call or game finished" })
     }
   } catch (error) {
-    console.error("Error in auto caller:", error)
+    console.error("Error in manual auto caller:", error)
     return NextResponse.json({ error: "Failed to call number" }, { status: 500 })
   }
 }
@@ -72,6 +72,7 @@ export async function GET() {
         id: room.id,
         status: room.status,
         players: room.players?.length || 0,
+        calledNumbers: room.calledNumbers?.length || 0,
       })),
     })
   } catch (error) {
