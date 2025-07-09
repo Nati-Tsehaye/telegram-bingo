@@ -77,10 +77,20 @@ export async function POST(request: Request) {
           gameState.gameStartTime = new Date().toISOString()
           gameState.lastUpdate = new Date().toISOString()
 
+          // Initialize empty arrays if they don't exist
+          if (!gameState.calledNumbers) {
+            gameState.calledNumbers = []
+          }
+          if (!gameState.winners) {
+            gameState.winners = []
+          }
+
           await GameStateManager.setGameState(roomId, gameState)
           await GameStateManager.scheduleNumberCalling(roomId)
 
-          console.log(`Game started for room ${roomId}`)
+          console.log(`🎮 Game started for room ${roomId}, status: ${gameState.gameStatus}`)
+        } else {
+          console.log(`⚠️ Game already started for room ${roomId}, current status: ${gameState.gameStatus}`)
         }
         break
 

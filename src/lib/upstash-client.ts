@@ -30,6 +30,7 @@ export class GameStateManager {
   // Store game state in Redis with TTL
   static async setGameState(roomId: string, state: unknown) {
     try {
+      console.log(`💾 Setting game state for room ${roomId}:`, state)
       await redis.setex(`game:${roomId}`, 3600, JSON.stringify(state)) // 1 hour TTL
 
       // Publish update to subscribers
@@ -41,6 +42,7 @@ export class GameStateManager {
           timestamp: new Date().toISOString(),
         }),
       )
+      console.log(`✅ Game state set and published for room ${roomId}`)
     } catch (error) {
       console.error(`Error setting game state for room ${roomId}:`, error)
       throw new Error(`Failed to set game state: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -50,13 +52,26 @@ export class GameStateManager {
   static async getGameState(roomId: string) {
     try {
       const data = await redis.get(`game:${roomId}`)
-      if (!data) return null
+      if (!data) {
+        console.log(`📭 No game state found for room ${roomId}`)
+        return null
+      }
 
       // Handle both string and object responses
+      let gameState
       if (typeof data === "string") {
-        return JSON.parse(data)
+        gameState = JSON.parse(data)
+      } else {
+        gameState = data // Already parsed by Upstash client
       }
-      return data // Already parsed by Upstash client
+
+      console.log(`📖 Retrieved game state for room ${roomId}:`, {
+        status: gameState.gameStatus,
+        calledNumbers: gameState.calledNumbers?.length || 0,
+        currentNumber: gameState.currentNumber,
+      })
+
+      return gameState
     } catch (error) {
       console.error(`Error getting game state for room ${roomId}:`, error)
       // Delete corrupted data
@@ -67,7 +82,31 @@ export class GameStateManager {
     }
   }
 
-  // Board selections management - Fixed to handle corrupted data
+  // NEW: Reset game state for a room
+  static async resetGameState(roomId: string) {
+    try {
+      console.log(`🔄 Resetting game state for room ${roomId}`)
+
+      const freshGameState = {
+        roomId,
+        calledNumbers: [],
+        currentNumber: null,
+        gameStatus: "waiting",
+        winners: [],
+        lastUpdate: new Date().toISOString(),
+      }
+
+      await this.setGameState(roomId, freshGameState)
+      console.log(`✅ Game state reset for room ${roomId}`)
+
+      return freshGameState
+    } catch (error) {
+      console.error(`Error resetting game state for room ${roomId}:`, error)
+      throw new Error(`Failed to reset game state: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+  }
+
+  // Board selections management - Enhanced with cleanup
   static async setBoardSelection(roomId: string, playerId: string, selection: unknown) {
     try {
       // Ensure selection is properly serialized
@@ -94,11 +133,23 @@ export class GameStateManager {
       const selections = await redis.hgetall(`boards:${roomId}`)
       if (!selections || Object.keys(selections).length === 0) return []
 
+      // Get current room to check active players
+      const room = await this.getRoom(roomId)
+      const activePlayerIds = new Set(room?.players?.map((p) => p.id) || [])
+
       const validSelections = []
       const corruptedKeys = []
+      const inactivePlayerKeys = []
 
       for (const [playerId, data] of Object.entries(selections)) {
         try {
+          // Check if player is still in the room
+          if (!activePlayerIds.has(playerId)) {
+            console.log(`🧹 Player ${playerId} no longer in room, marking for cleanup`)
+            inactivePlayerKeys.push(playerId)
+            continue
+          }
+
           // Handle different data types
           let parsedData
           if (typeof data === "string") {
@@ -136,16 +187,20 @@ export class GameStateManager {
         }
       }
 
-      // Clean up corrupted entries
-      if (corruptedKeys.length > 0) {
-        console.log(`Cleaning up ${corruptedKeys.length} corrupted board selections`)
+      // Clean up corrupted entries and inactive players
+      const keysToCleanup = [...corruptedKeys, ...inactivePlayerKeys]
+      if (keysToCleanup.length > 0) {
+        console.log(
+          `🧹 Cleaning up ${keysToCleanup.length} board selections (${corruptedKeys.length} corrupted, ${inactivePlayerKeys.length} inactive players)`,
+        )
         try {
-          await redis.hdel(`boards:${roomId}`, ...corruptedKeys)
+          await redis.hdel(`boards:${roomId}`, ...keysToCleanup)
         } catch (error) {
-          console.error("Error cleaning up corrupted selections:", error)
+          console.error("Error cleaning up board selections:", error)
         }
       }
 
+      console.log(`📊 Returning ${validSelections.length} valid board selections for room ${roomId}`)
       return validSelections
     } catch (error) {
       console.error(`Error getting board selections for room ${roomId}:`, error)
@@ -173,6 +228,81 @@ export class GameStateManager {
     } catch (error) {
       console.error(`Error removing board selection for room ${roomId}, player ${playerId}:`, error)
       throw new Error(`Failed to remove board selection: ${error instanceof Error ? error.message : "Unknown error"}`)
+    }
+  }
+
+  // NEW: Remove player from all board selections across all rooms
+  static async removePlayerFromAllBoardSelections(playerId: string) {
+    try {
+      console.log(`🧹 Removing player ${playerId} from all board selections...`)
+
+      const boardKeys = await redis.keys("boards:*")
+      let removedFromBoards = 0
+
+      for (const key of boardKeys) {
+        try {
+          const roomId = key.replace("boards:", "")
+          const selections = await redis.hgetall(key)
+
+          if (selections && selections[playerId]) {
+            await redis.hdel(key, playerId)
+            removedFromBoards++
+            console.log(`🗑️ Removed board selection for player ${playerId} from room ${roomId}`)
+
+            // Publish removal update
+            await redis.publish(
+              `room:${roomId}`,
+              JSON.stringify({
+                type: "board_deselection",
+                data: { playerId },
+                timestamp: new Date().toISOString(),
+              }),
+            )
+          }
+        } catch (error) {
+          console.error(`Error removing board selection from ${key}:`, error)
+        }
+      }
+
+      console.log(`✅ Removed player ${playerId} from ${removedFromBoards} board selections`)
+      return removedFromBoards
+    } catch (error) {
+      console.error(`Error removing player ${playerId} from all board selections:`, error)
+      return 0
+    }
+  }
+
+  // Clean up board selections for players no longer in room
+  static async cleanupBoardSelections(roomId: string) {
+    try {
+      console.log(`🧹 Cleaning up board selections for room ${roomId}`)
+
+      const room = await this.getRoom(roomId)
+      if (!room) {
+        // Room doesn't exist, clear all board selections
+        await redis.del(`boards:${roomId}`)
+        console.log(`🗑️ Cleared all board selections for non-existent room ${roomId}`)
+        return
+      }
+
+      const activePlayerIds = new Set(room.players?.map((p) => p.id) || [])
+      const selections = await redis.hgetall(`boards:${roomId}`)
+
+      if (!selections || Object.keys(selections).length === 0) return
+
+      const inactivePlayerKeys = []
+      for (const playerId of Object.keys(selections)) {
+        if (!activePlayerIds.has(playerId)) {
+          inactivePlayerKeys.push(playerId)
+        }
+      }
+
+      if (inactivePlayerKeys.length > 0) {
+        await redis.hdel(`boards:${roomId}`, ...inactivePlayerKeys)
+        console.log(`🧹 Removed ${inactivePlayerKeys.length} board selections from inactive players in room ${roomId}`)
+      }
+    } catch (error) {
+      console.error(`Error cleaning up board selections for room ${roomId}:`, error)
     }
   }
 
@@ -240,6 +370,9 @@ export class GameStateManager {
 
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
+
+      // Clean up board selections after room update
+      await this.cleanupBoardSelections(roomId)
     } catch (error) {
       console.error(`❌ Error setting room ${roomId}:`, error)
       console.error(`Room data:`, room)
@@ -360,6 +493,7 @@ export class GameStateManager {
   static async setPlayerSession(playerId: string, roomId: string) {
     try {
       await redis.setex(`player:${playerId}`, 3600, roomId)
+      console.log(`📝 Set player session: ${playerId} -> ${roomId}`)
     } catch (error) {
       console.error(`Error setting player session for ${playerId}:`, error)
       throw new Error(`Failed to set player session: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -378,24 +512,235 @@ export class GameStateManager {
   static async removePlayerSession(playerId: string) {
     try {
       await redis.del(`player:${playerId}`)
+      console.log(`🗑️ Removed player session: ${playerId}`)
     } catch (error) {
       console.error(`Error removing player session for ${playerId}:`, error)
     }
   }
 
-  // Game number calling with auto-increment
+  // Enhanced method to remove player from all rooms and clean up board selections
+  static async removePlayerFromAllRooms(playerId: string) {
+    try {
+      console.log(`🧹 Removing player ${playerId} from all rooms...`)
+
+      const rooms = await this.getAllRooms()
+      let removedFromRooms = 0
+
+      for (const room of rooms) {
+        if (Array.isArray(room.players)) {
+          const originalPlayerCount = room.players.length
+          room.players = room.players.filter((player) => player.id !== playerId)
+
+          if (room.players.length !== originalPlayerCount) {
+            // Player was in this room, update it
+            room.prize = room.players.length * room.stake
+
+            // Reset room if empty or insufficient players
+            if (room.players.length === 0) {
+              room.status = "waiting"
+              room.activeGames = 0
+              room.calledNumbers = []
+              room.currentNumber = undefined
+              room.gameStartTime = undefined
+
+              // Reset game state
+              await this.resetGameState(room.id)
+            } else if (room.players.length < 2 && room.status !== "waiting") {
+              // If we go below minimum players and game was active, reset
+              room.status = "waiting"
+              room.activeGames = 0
+              room.calledNumbers = []
+              room.currentNumber = undefined
+              room.gameStartTime = undefined
+
+              // Reset game state
+              await this.resetGameState(room.id)
+            }
+
+            await this.setRoom(room.id, room)
+
+            // Also remove their board selection
+            await this.removeBoardSelection(room.id, playerId)
+
+            removedFromRooms++
+            console.log(`🏠 Removed player from room ${room.id} (${originalPlayerCount} -> ${room.players.length})`)
+          }
+        }
+      }
+
+      console.log(`✅ Player ${playerId} removed from ${removedFromRooms} rooms`)
+      return removedFromRooms
+    } catch (error) {
+      console.error(`Error removing player ${playerId} from all rooms:`, error)
+      return 0
+    }
+  }
+
+  // AGGRESSIVE GHOST PLAYER CLEANUP - Remove all guest players except current active ones
+  static async aggressiveGhostCleanup(activePlayerIds: Set<string> = new Set()) {
+    try {
+      console.log(`🔥 Starting aggressive ghost player cleanup...`)
+      console.log(`🔒 Protected player IDs:`, Array.from(activePlayerIds))
+
+      const rooms = await this.getAllRooms()
+      let totalGhostPlayersRemoved = 0
+
+      for (const room of rooms) {
+        if (Array.isArray(room.players) && room.players.length > 0) {
+          const originalPlayerCount = room.players.length
+
+          // Remove ALL guest players except those in the protected list
+          room.players = room.players.filter((player) => {
+            const isProtected = activePlayerIds.has(player.id)
+            const isGuestPlayer = player.id.startsWith("guest-")
+            const isTelegramUser = !isGuestPlayer // Telegram users have numeric IDs
+
+            // Keep if: protected, OR is a real Telegram user
+            const shouldKeep = isProtected || isTelegramUser
+
+            if (!shouldKeep && isGuestPlayer) {
+              console.log(`👻 Removing ghost guest player ${player.id} from room ${room.id}`)
+            }
+
+            return shouldKeep
+          })
+
+          // Update prize based on current player count
+          room.prize = room.players.length * room.stake
+
+          // Reset room status if no players left or insufficient players
+          if (room.players.length === 0 && room.status !== "waiting") {
+            room.status = "waiting"
+            room.activeGames = 0
+            room.calledNumbers = []
+            room.currentNumber = undefined
+            room.gameStartTime = undefined
+
+            // Reset game state
+            await this.resetGameState(room.id)
+            console.log(`🔄 Reset room ${room.id} to waiting state (no active players)`)
+          } else if (room.players.length < 2 && room.status !== "waiting") {
+            // If we go below minimum players and game was active, reset
+            room.status = "waiting"
+            room.activeGames = 0
+            room.calledNumbers = []
+            room.currentNumber = undefined
+            room.gameStartTime = undefined
+
+            // Reset game state
+            await this.resetGameState(room.id)
+            console.log(`🔄 Reset room ${room.id} due to insufficient players`)
+          }
+
+          const ghostPlayersRemoved = originalPlayerCount - room.players.length
+          if (ghostPlayersRemoved > 0) {
+            totalGhostPlayersRemoved += ghostPlayersRemoved
+            await this.setRoom(room.id, room)
+            console.log(`🧹 Removed ${ghostPlayersRemoved} ghost players from room ${room.id}`)
+          }
+        }
+      }
+
+      // Also clean up orphaned player sessions for guest players
+      const playerSessionKeys = await redis.keys("player:guest-*")
+      let cleanedSessions = 0
+
+      for (const key of playerSessionKeys) {
+        const playerId = key.replace("player:", "")
+        if (!activePlayerIds.has(playerId)) {
+          await redis.del(key)
+          cleanedSessions++
+          console.log(`🗑️ Removed orphaned session for ghost player: ${playerId}`)
+        }
+      }
+
+      // Clean up orphaned board selections for guest players
+      const boardKeys = await redis.keys("boards:*")
+      let cleanedBoardSelections = 0
+
+      for (const key of boardKeys) {
+        const roomId = key.replace("boards:", "")
+        const selections = await redis.hgetall(key)
+
+        if (selections && Object.keys(selections).length > 0) {
+          const ghostPlayerKeys = []
+
+          for (const playerId of Object.keys(selections)) {
+            if (playerId.startsWith("guest-") && !activePlayerIds.has(playerId)) {
+              ghostPlayerKeys.push(playerId)
+            }
+          }
+
+          if (ghostPlayerKeys.length > 0) {
+            await redis.hdel(key, ...ghostPlayerKeys)
+            cleanedBoardSelections += ghostPlayerKeys.length
+            console.log(`🧹 Removed ${ghostPlayerKeys.length} ghost board selections from room ${roomId}`)
+          }
+        }
+      }
+
+      console.log(`🔥 Aggressive cleanup completed:`)
+      console.log(`   - ${totalGhostPlayersRemoved} ghost players removed from rooms`)
+      console.log(`   - ${cleanedSessions} orphaned player sessions cleaned`)
+      console.log(`   - ${cleanedBoardSelections} ghost board selections removed`)
+
+      return {
+        ghostPlayersRemoved: totalGhostPlayersRemoved,
+        sessionsRemoved: cleanedSessions,
+        boardSelectionsRemoved: cleanedBoardSelections,
+      }
+    } catch (error) {
+      console.error("Error during aggressive ghost cleanup:", error)
+      return {
+        ghostPlayersRemoved: 0,
+        sessionsRemoved: 0,
+        boardSelectionsRemoved: 0,
+      }
+    }
+  }
+
+  // Game number calling with auto-increment - FIXED VERSION
   static async callNextNumber(roomId: string) {
     try {
-      const gameState = await this.getGameState(roomId)
-      if (!gameState || gameState.gameStatus !== "active") return null
+      console.log(`🎲 Calling next number for room: ${roomId}`)
+
+      let gameState = await this.getGameState(roomId)
+      if (!gameState) {
+        console.log(`❌ No game state found for room ${roomId}, creating new one`)
+        // Create a new game state if it doesn't exist
+        gameState = {
+          roomId,
+          calledNumbers: [],
+          currentNumber: null,
+          gameStatus: "active",
+          winners: [],
+          lastUpdate: new Date().toISOString(),
+        }
+        await this.setGameState(roomId, gameState)
+      }
+
+      if (gameState.gameStatus !== "active") {
+        console.log(`⏹️ Game not active for room ${roomId}, status: ${gameState.gameStatus}`)
+        return null
+      }
+
+      // Ensure calledNumbers is an array
+      if (!Array.isArray(gameState.calledNumbers)) {
+        console.log(`🔧 Initializing calledNumbers array for room ${roomId}`)
+        gameState.calledNumbers = []
+      }
 
       // Get available numbers (1-75 that haven't been called)
       const availableNumbers = Array.from({ length: 75 }, (_, i) => i + 1).filter(
         (num) => !gameState.calledNumbers.includes(num),
       )
 
+      console.log(`📊 Available numbers for room ${roomId}: ${availableNumbers.length}/75`)
+      console.log(`📋 Already called: [${gameState.calledNumbers.join(", ")}]`)
+
       if (availableNumbers.length === 0) {
         // Game over - all numbers called
+        console.log(`🏁 All numbers called for room ${roomId}, finishing game`)
         gameState.gameStatus = "finished"
         gameState.lastUpdate = new Date().toISOString()
         await this.setGameState(roomId, gameState)
@@ -406,15 +751,22 @@ export class GameStateManager {
       const randomIndex = Math.floor(Math.random() * availableNumbers.length)
       const newNumber = availableNumbers[randomIndex]
 
+      console.log(`🎯 Selected number: ${newNumber} (${randomIndex + 1}/${availableNumbers.length} available)`)
+
       // Update game state
       gameState.currentNumber = newNumber
       gameState.calledNumbers.push(newNumber)
       gameState.lastUpdate = new Date().toISOString()
 
+      console.log(`💾 Updating game state for room ${roomId} with new number ${newNumber}`)
       await this.setGameState(roomId, gameState)
+
+      console.log(`✅ Successfully called number ${newNumber} for room ${roomId}`)
+      console.log(`📊 Total called: ${gameState.calledNumbers.length}/75`)
+
       return newNumber
     } catch (error) {
-      console.error(`Error calling next number for room ${roomId}:`, error)
+      console.error(`❌ Error calling next number for room ${roomId}:`, error)
       return null
     }
   }
@@ -422,8 +774,10 @@ export class GameStateManager {
   // Auto number calling scheduler
   static async scheduleNumberCalling(roomId: string) {
     try {
+      console.log(`⏰ Scheduling number calling for room ${roomId}`)
       const key = `scheduler:${roomId}`
       await redis.setex(key, 300, "active") // 5 minutes TTL
+      console.log(`✅ Number calling scheduled for room ${roomId}`)
     } catch (error) {
       console.error(`Error scheduling number calling for room ${roomId}:`, error)
     }
@@ -432,7 +786,9 @@ export class GameStateManager {
   static async isNumberCallingActive(roomId: string) {
     try {
       const key = `scheduler:${roomId}`
-      return await redis.exists(key)
+      const exists = await redis.exists(key)
+      console.log(`🔍 Number calling active for room ${roomId}: ${exists ? "YES" : "NO"}`)
+      return exists
     } catch (error) {
       console.error(`Error checking number calling status for room ${roomId}:`, error)
       return false
@@ -464,7 +820,7 @@ export class GameStateManager {
     }
   }
 
-  // Cleanup expired data and corrupted entries
+  // Enhanced cleanup with board selection cleanup
   static async cleanup() {
     try {
       console.log("🧹 Starting Redis cleanup...")
@@ -488,6 +844,25 @@ export class GameStateManager {
         }
       }
 
+      // Clean up expired player sessions
+      const playerKeys = await redis.keys("player:*")
+      let cleanedSessions = 0
+      for (const key of playerKeys) {
+        try {
+          const ttl = await redis.ttl(key)
+          if (ttl <= 0) {
+            await redis.del(key)
+            cleanedSessions++
+          }
+        } catch {
+          console.error(`Error cleaning player session key ${key}`)
+          try {
+            await redis.del(key)
+            cleanedSessions++
+          } catch {}
+        }
+      }
+
       // Clean up corrupted room data
       const roomKeys = await redis.keys("room:*")
       let cleanedRooms = 0
@@ -506,28 +881,14 @@ export class GameStateManager {
         }
       }
 
-      // Clean up corrupted board selections
+      // Clean up board selections for all rooms
       const boardKeys = await redis.keys("boards:*")
       let cleanedBoards = 0
       for (const key of boardKeys) {
         try {
-          const selections = await redis.hgetall(key)
-          if (selections) {
-            const corruptedFields = []
-            for (const [field, value] of Object.entries(selections)) {
-              try {
-                if (typeof value === "string" && !value.startsWith("{")) {
-                  corruptedFields.push(field)
-                }
-              } catch {
-                corruptedFields.push(field)
-              }
-            }
-            if (corruptedFields.length > 0) {
-              await redis.hdel(key, ...corruptedFields)
-              cleanedBoards += corruptedFields.length
-            }
-          }
+          const roomId = key.replace("boards:", "")
+          await this.cleanupBoardSelections(roomId)
+          cleanedBoards++
         } catch {
           console.log(`Deleting corrupted board data: ${key}`)
           try {
@@ -538,7 +899,7 @@ export class GameStateManager {
       }
 
       console.log(
-        `✅ Cleanup completed: ${cleanedGames} games, ${cleanedRooms} rooms, ${cleanedBoards} board selections`,
+        `✅ Cleanup completed: ${cleanedGames} games, ${cleanedRooms} rooms, ${cleanedBoards} board collections, ${cleanedSessions} player sessions`,
       )
     } catch (error) {
       console.error("Error during cleanup:", error)

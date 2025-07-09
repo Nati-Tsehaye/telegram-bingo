@@ -9,7 +9,7 @@ import { useTelegram } from "@/components/telegram-provider"
 import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
 export default function Homepage() {
-  const { webApp, user, isReady } = useTelegram()
+  const { webApp, user, isReady, guestId } = useTelegram()
   const [activeTab, setActiveTab] = useState("Stake")
   const [gameRooms, setGameRooms] = useState<GameRoomSummary[]>([])
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
@@ -19,6 +19,19 @@ export default function Homepage() {
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [error, setError] = useState<string | null>(null)
+
+  // Get consistent player ID - use Telegram user ID or persistent guest ID
+  const getPlayerId = useCallback(() => {
+    if (user?.id) {
+      return user.id.toString()
+    }
+    if (guestId) {
+      return guestId
+    }
+    // Fallback - this should rarely happen now
+    console.warn("No user ID or guest ID available, using fallback")
+    return `fallback-${Date.now()}`
+  }, [user?.id, guestId])
 
   // Fetch rooms from API with better error handling
   const fetchRooms = useCallback(async () => {
@@ -95,7 +108,8 @@ export default function Homepage() {
     setConnectingRoomId(room.id)
 
     try {
-      const playerId = user?.id?.toString() || `guest-${Date.now()}`
+      const playerId = getPlayerId()
+      console.log("🎮 Joining room with player ID:", playerId)
 
       // Use absolute URL for Telegram Mini App
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
@@ -130,21 +144,7 @@ export default function Homepage() {
         webApp?.BackButton.show()
         webApp?.BackButton.onClick(async () => {
           // Leave room when going back
-          await fetch(url, {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-              action: "leave",
-              playerId,
-            }),
-          })
-
-          setCurrentScreen("lobby")
-          setSelectedRoom(null)
-          webApp?.BackButton.hide()
-          fetchRooms()
+          await handleLeaveRoom(playerId)
         })
       } else {
         webApp?.showAlert(data.error || "Failed to join room")
@@ -154,6 +154,49 @@ export default function Homepage() {
       webApp?.showAlert("Failed to join room. Please try again.")
     } finally {
       setConnectingRoomId(null)
+    }
+  }
+
+  // Enhanced leave room function
+  const handleLeaveRoom = async (playerId: string) => {
+    try {
+      console.log("👋 Leaving room for player:", playerId)
+
+      const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
+      const url = `${baseUrl}/api/rooms`
+
+      const response = await fetch(url, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          action: "leave",
+          playerId,
+        }),
+      })
+
+      const data = await response.json()
+      console.log("Leave room response:", data)
+
+      // Always return to lobby and refresh rooms
+      setCurrentScreen("lobby")
+      setSelectedRoom(null)
+      webApp?.BackButton.hide()
+
+      // Force refresh rooms to update player counts
+      await fetchRooms()
+
+      if (!data.success) {
+        console.warn("Leave room API returned error:", data.error)
+      }
+    } catch (error) {
+      console.error("Error leaving room:", error)
+      // Still return to lobby even if API call fails
+      setCurrentScreen("lobby")
+      setSelectedRoom(null)
+      webApp?.BackButton.hide()
+      await fetchRooms()
     }
   }
 
@@ -193,7 +236,7 @@ export default function Homepage() {
   }
 
   if (currentScreen === "game" && selectedRoom) {
-    return <GameScreen room={selectedRoom} onBack={() => setCurrentScreen("lobby")} />
+    return <GameScreen room={selectedRoom} onBack={() => handleLeaveRoom(getPlayerId())} />
   }
 
   return (
@@ -208,6 +251,12 @@ export default function Homepage() {
             <div className="flex items-center gap-2 text-white text-sm">
               <User className="h-4 w-4" />
               <span>Hi, {user.first_name}!</span>
+            </div>
+          )}
+          {!user && guestId && (
+            <div className="flex items-center gap-2 text-white text-sm">
+              <User className="h-4 w-4" />
+              <span>Guest Player</span>
             </div>
           )}
         </div>
@@ -255,6 +304,8 @@ export default function Homepage() {
           <div>App URL: {process.env.NEXT_PUBLIC_APP_URL || "Not set"}</div>
           <div>Is Telegram: {webApp ? "Yes" : "No"}</div>
           <div>User ID: {user?.id || "None"}</div>
+          <div>Guest ID: {guestId || "None"}</div>
+          <div>Player ID: {getPlayerId()}</div>
           <div>Rooms loaded: {gameRooms.length}</div>
           {error && <div className="text-red-600">Error: {error}</div>}
         </div>
@@ -383,6 +434,7 @@ export default function Homepage() {
             {user.username && ` (@${user.username})`}
           </div>
         )}
+        {!user && guestId && <div className="mt-2 text-xs">Playing as Guest • ID: {guestId.split("-")[1]}</div>}
       </div>
     </div>
   )

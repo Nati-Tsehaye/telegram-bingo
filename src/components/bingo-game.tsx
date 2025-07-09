@@ -34,7 +34,7 @@ interface BingoGameProps {
 type WinPattern = "horizontal" | "vertical" | "diagonal" | "edges" | "full-house"
 
 export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProps) {
-  const { user, webApp } = useTelegram()
+  const { user, webApp, guestId } = useTelegram()
   const [isMuted, setIsMuted] = useState(false)
   const [gameState, setGameState] = useState<GameState>({
     roomId: room.id,
@@ -67,40 +67,101 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
 
   // Audio ref for playing number sounds
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const bingoLetters = ["B", "I", "N", "G", "O"]
   const letterColors = ["bg-yellow-500", "bg-green-500", "bg-blue-500", "bg-orange-500", "bg-purple-500"]
 
-  const playerId = user?.id?.toString() || `guest-${Date.now()}`
+  // Get consistent player ID - use Telegram user ID or persistent guest ID
+  const getPlayerId = useCallback(() => {
+    if (user?.id) {
+      return user.id.toString()
+    }
+    if (guestId) {
+      return guestId
+    }
+    // Fallback - this should rarely happen now
+    console.warn("No user ID or guest ID available, using fallback")
+    return `fallback-${Date.now()}`
+  }, [user?.id, guestId])
+
+  const playerId = getPlayerId()
   const playerName = user?.first_name || "Guest Player"
 
-  // Function to play audio for called number
+  // Function to play audio for called number - FIXED VERSION
   const playNumberAudio = useCallback(
     (number: number) => {
-      if (isMuted) return
+      if (isMuted) {
+        console.log(`🔇 Audio muted, skipping number ${number}`)
+        return
+      }
+
+      console.log(`🔊 Attempting to play audio for number: ${number}`)
 
       try {
-        const audio = new Audio(`/audio/men/${number}.mp3`)
+        // Create audio element
+        const audio = new Audio()
+        audio.preload = "auto"
         audio.volume = 0.7
-        audio.play().catch((error) => {
-          console.warn(`Failed to play audio for number ${number}:`, error)
-        })
+        audio.crossOrigin = "anonymous" // Add this for CORS
 
+        // Set the source
+        audio.src = `/audio/men/${number}.mp3`
+        console.log(`🎵 Audio source set: ${audio.src}`)
+
+        // Handle successful load and play
+        const playAudio = () => {
+          console.log(`▶️ Playing audio for number ${number}`)
+          audio
+            .play()
+            .then(() => {
+              console.log(`✅ Successfully playing audio for number ${number}`)
+              setLastPlayedNumber(number)
+            })
+            .catch((error) => {
+              console.warn(`❌ Failed to play audio for number ${number}:`, error)
+              // Fallback: try to play a generic sound or show visual feedback
+              webApp?.HapticFeedback.notificationOccurred("success")
+              setLastPlayedNumber(number) // Still mark as played for tracking
+            })
+        }
+
+        // Handle errors
+        const handleError = (error: Event) => {
+          console.warn(`❌ Error loading audio for number ${number}:`, error)
+          // Fallback to haptic feedback
+          webApp?.HapticFeedback.notificationOccurred("success")
+          setLastPlayedNumber(number) // Still mark as played for tracking
+        }
+
+        // Set up event listeners
+        audio.addEventListener("canplay", playAudio, { once: true })
+        audio.addEventListener("error", handleError, { once: true })
+
+        // Cleanup after playing
         audio.addEventListener("ended", () => {
+          console.log(`🏁 Audio ended for number ${number}`)
           audio.remove()
         })
 
+        // Load the audio
+        audio.load()
+
+        // Cleanup timeout as fallback
         setTimeout(() => {
           if (audio) {
             audio.pause()
             audio.remove()
           }
-        }, 5000)
+        }, 10000) // 10 seconds max
       } catch (error) {
-        console.warn(`Error creating audio for number ${number}:`, error)
+        console.warn(`❌ Error creating audio for number ${number}:`, error)
+        // Fallback to haptic feedback
+        webApp?.HapticFeedback.notificationOccurred("success")
+        setLastPlayedNumber(number) // Still mark as played for tracking
       }
     },
-    [isMuted],
+    [isMuted, webApp],
   )
 
   // Function to play BINGO win sound
@@ -108,15 +169,41 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     if (isMuted) return
 
     try {
-      const audio = new Audio(`/audio/bingo-win.mp3`)
+      const audio = new Audio()
+      audio.preload = "auto"
       audio.volume = 0.8
-      audio.play().catch(() => {
-        playNumberAudio(75)
-      })
+      audio.src = `/audio/bingo-win.mp3`
+
+      const playAudio = () => {
+        audio.play().catch((error) => {
+          console.warn("Failed to play BINGO sound:", error)
+          // Fallback to number sound or haptic
+          webApp?.HapticFeedback.notificationOccurred("success")
+          playNumberAudio(75) // Play number 75 as fallback
+        })
+      }
+
+      if (audio.readyState >= 2) {
+        playAudio()
+      } else {
+        audio.addEventListener("canplay", playAudio, { once: true })
+        audio.addEventListener(
+          "error",
+          (error) => {
+            console.warn("Error loading BINGO sound, using fallback")
+            webApp?.HapticFeedback.notificationOccurred("success")
+            playNumberAudio(75)
+          },
+          { once: true },
+        )
+
+        audio.load()
+      }
     } catch (error) {
       console.warn("Error playing BINGO sound:", error)
+      webApp?.HapticFeedback.notificationOccurred("success")
     }
-  }, [isMuted, playNumberAudio])
+  }, [isMuted, webApp, playNumberAudio])
 
   // Check for winning patterns
   const checkForBingo = useCallback(
@@ -278,21 +365,113 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   // Fetch game state from server
   const fetchGameState = useCallback(async () => {
     try {
+      console.log(`🔍 Fetching game state for room: ${room.id}`)
       const response = await fetch(`/api/game-state?roomId=${room.id}`)
       const data = await response.json()
 
       if (data.success) {
+        console.log(`📊 Game state fetched:`, {
+          status: data.gameState.gameStatus,
+          calledNumbers: data.gameState.calledNumbers?.length || 0,
+          currentNumber: data.gameState.currentNumber,
+        })
         setGameState(data.gameState)
+      } else {
+        console.error("Failed to fetch game state:", data.error)
       }
     } catch (error) {
       console.error("Failed to fetch game state:", error)
     }
   }, [room.id])
 
-  // Start the game
+  // Manual number calling function for testing
+  const callNumberManually = useCallback(async () => {
+    try {
+      console.log(`🎯 Manually calling number for room: ${room.id}`)
+      const response = await fetch("/api/auto-caller", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roomId: room.id,
+        }),
+      })
+
+      const data = await response.json()
+      console.log("Manual call response:", data)
+
+      if (data.success && data.calledNumber) {
+        console.log(`📢 Manually called number: ${data.calledNumber}`)
+        // Refresh game state to get the updated data
+        await fetchGameState()
+      } else {
+        console.log("Manual call failed or no number returned:", data.message)
+      }
+    } catch (error) {
+      console.error("Error in manual number calling:", error)
+    }
+  }, [room.id, fetchGameState])
+
+  // Auto number calling function
+  const startAutoNumberCalling = useCallback(() => {
+    console.log(`🚀 Starting auto number calling for room: ${room.id}`)
+
+    // Clear any existing interval
+    if (intervalRef.current) {
+      clearInterval(intervalRef.current)
+    }
+
+    const callNumber = async () => {
+      try {
+        console.log(`⏰ Auto-calling number for room: ${room.id}`)
+        const response = await fetch("/api/auto-caller", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            roomId: room.id,
+          }),
+        })
+
+        const data = await response.json()
+        console.log("Auto call response:", data)
+
+        if (data.success && data.calledNumber) {
+          console.log(`📢 Auto-called number: ${data.calledNumber}`)
+          // Refresh game state to get the updated data
+          await fetchGameState()
+        } else {
+          console.log("Auto call failed or no number returned:", data.message)
+          // If game is finished or no more numbers, stop calling
+          if (data.message?.includes("finished") || data.message?.includes("All numbers called")) {
+            if (intervalRef.current) {
+              clearInterval(intervalRef.current)
+              intervalRef.current = null
+            }
+          }
+        }
+      } catch (error) {
+        console.error("Error in auto number calling:", error)
+      }
+    }
+
+    // Call first number after 2 seconds
+    setTimeout(callNumber, 2000)
+
+    // Then call every 4 seconds
+    intervalRef.current = setInterval(callNumber, 4000)
+
+    console.log(`✅ Auto calling started for room: ${room.id}`)
+  }, [room.id, fetchGameState])
+
+  // Update the startGame function
   const startGame = useCallback(async () => {
     try {
       setIsLoading(true)
+      console.log("🎮 Starting game for room:", room.id)
+
       const response = await fetch("/api/game-state", {
         method: "POST",
         headers: {
@@ -307,19 +486,35 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       const data = await response.json()
       if (data.success) {
         setGameState(data.gameState)
+        console.log("✅ Game started, status:", data.gameState.gameStatus)
+
+        // Start auto number calling after a short delay
+        if (data.gameState.gameStatus === "active") {
+          setTimeout(() => {
+            startAutoNumberCalling()
+          }, 1000)
+        }
+      } else {
+        console.error("Failed to start game:", data.error)
       }
     } catch (error) {
       console.error("Failed to start game:", error)
     } finally {
       setIsLoading(false)
     }
-  }, [room.id])
+  }, [room.id, startAutoNumberCalling])
 
   // Reset/restart the game
   const resetGame = useCallback(async () => {
     try {
       setIsLoading(true)
       setShowResultScreen(false)
+
+      // Clear any running intervals
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
 
       const response = await fetch("/api/game-state", {
         method: "POST",
@@ -335,7 +530,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       const data = await response.json()
       if (data.success) {
         setGameState(data.gameState)
-        setRecentCalls([])
+        setRecentCalls([]) // Add this line to clear recent calls
         setLastPlayedNumber(null)
         setHasBingo(false)
         setBingoClaimed(false)
@@ -364,51 +559,91 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
   // Auto-start game when component mounts
   useEffect(() => {
     const initGame = async () => {
+      console.log("🚀 Initializing game...")
+
+      // Clear any previous game state when component mounts
+      setRecentCalls([])
+      setLastPlayedNumber(null)
+      setHasBingo(false)
+      setBingoClaimed(false)
+
       await fetchGameState()
 
       setTimeout(async () => {
+        console.log("🔍 Checking if game needs to be started...")
         const currentState = await fetch(`/api/game-state?roomId=${room.id}`)
         const data = await currentState.json()
 
-        if (data.success && data.gameState.gameStatus === "waiting") {
-          await startGame()
+        if (data.success) {
+          console.log("Current game status:", data.gameState.gameStatus)
+          if (data.gameState.gameStatus === "waiting") {
+            console.log("🎮 Game is waiting, starting it...")
+            await startGame()
+          } else if (data.gameState.gameStatus === "active") {
+            console.log("🎮 Game is already active, starting auto calling...")
+            startAutoNumberCalling()
+          }
         }
       }, 1000)
     }
 
     initGame()
-  }, [room.id, fetchGameState, startGame])
+
+    // Cleanup on unmount
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [room.id, fetchGameState, startGame, startAutoNumberCalling])
 
   // Add these imports at the top
   const { isConnected: _isConnected } = useRealtime(room.id, playerId)
 
-  // Add event listener for game state updates
+  // FIXED: Add event listener for game state updates with proper recent calls tracking
   useEffect(() => {
     const handleGameStateUpdate = (event: CustomEvent) => {
       const newGameState = event.detail
-      console.log("Game state update received:", newGameState)
+      console.log("🔄 Game state update received:", newGameState)
 
-      // Check if there's a new number called and play audio
-      if (
-        newGameState.currentNumber &&
-        newGameState.currentNumber !== gameState.currentNumber &&
-        newGameState.currentNumber !== lastPlayedNumber
-      ) {
-        console.log(`New number called: ${newGameState.currentNumber}`)
-        playNumberAudio(newGameState.currentNumber)
-        setLastPlayedNumber(newGameState.currentNumber)
+      // If this is a fresh game (no called numbers), clear recent calls
+      if (!newGameState.calledNumbers || newGameState.calledNumbers.length === 0) {
+        setRecentCalls([])
+        setLastPlayedNumber(null)
       }
 
-      // Update recent calls when current number changes
-      if (newGameState.currentNumber !== gameState.currentNumber && gameState.currentNumber !== null) {
-        setRecentCalls((prev) => {
-          const newRecent = [gameState.currentNumber!, ...prev]
-          return newRecent.slice(0, 4)
-        })
+      // FIXED: Check if there's a new number called and play audio
+      if (newGameState.currentNumber && newGameState.currentNumber !== gameState.currentNumber) {
+        console.log(`🆕 New number detected: ${newGameState.currentNumber} (previous: ${gameState.currentNumber})`)
+
+        // Only play if this number hasn't been played yet
+        if (newGameState.currentNumber !== lastPlayedNumber) {
+          console.log(`🎵 Playing audio for new number: ${newGameState.currentNumber}`)
+          playNumberAudio(newGameState.currentNumber)
+        } else {
+          console.log(`🔇 Number ${newGameState.currentNumber} already played, skipping audio`)
+        }
+
+        // FIXED: Update recent calls when we have a new current number
+        // Add the PREVIOUS current number to recent calls (not the new one)
+        if (gameState.currentNumber !== null && gameState.currentNumber !== newGameState.currentNumber) {
+          console.log(`📝 Adding ${gameState.currentNumber} to recent calls`)
+          setRecentCalls((prev) => {
+            const newRecent = [gameState.currentNumber!, ...prev.slice(0, 3)] // Keep only 3 previous + new one = 4 total
+            console.log(`📋 Updated recent calls:`, newRecent)
+            return newRecent
+          })
+        }
       }
 
       // Check if game finished and show result screen
       if (newGameState.gameStatus === "finished" && gameState.gameStatus !== "finished") {
+        // Stop auto calling
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+        }
         setTimeout(() => {
           setShowResultScreen(true)
         }, 2000)
@@ -424,10 +659,28 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     }
   }, [gameState.currentNumber, gameState.gameStatus, lastPlayedNumber, playNumberAudio])
 
-  // Replace the polling interval with initial fetch only
+  // FIXED: Handle direct gameState updates for recent calls
   useEffect(() => {
-    fetchGameState()
-  }, [fetchGameState])
+    // When gameState.currentNumber changes directly, update recent calls
+    if (gameState.currentNumber && gameState.calledNumbers.length > 1) {
+      // Get the last 4 called numbers (excluding the current one) for recent calls
+      const previousCalls = gameState.calledNumbers
+        .filter((num) => num !== gameState.currentNumber) // Exclude current number
+        .slice(-4) // Get last 4
+        .reverse() // Most recent first
+
+      console.log(`📋 Direct state update - setting recent calls:`, previousCalls)
+      setRecentCalls(previousCalls)
+    }
+  }, [gameState.currentNumber, gameState.calledNumbers])
+
+  // FIXED: Also check for current number changes when gameState updates directly
+  useEffect(() => {
+    if (gameState.currentNumber && gameState.currentNumber !== lastPlayedNumber) {
+      console.log(`🎵 Direct state update - playing audio for: ${gameState.currentNumber}`)
+      playNumberAudio(gameState.currentNumber)
+    }
+  }, [gameState.currentNumber, lastPlayedNumber, playNumberAudio])
 
   // Auto-mark called numbers on player's board and check for wins
   useEffect(() => {
@@ -505,6 +758,19 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     if (!isMuted && audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
+    }
+  }
+
+  // Test audio function for debugging
+  const testAudio = () => {
+    console.log("🧪 Testing audio with current number:", gameState.currentNumber)
+    if (gameState.currentNumber) {
+      playNumberAudio(gameState.currentNumber)
+    } else {
+      // Test with a random number
+      const testNumber = Math.floor(Math.random() * 75) + 1
+      console.log("🧪 Testing with random number:", testNumber)
+      playNumberAudio(testNumber)
     }
   }
 
@@ -713,20 +979,15 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         </div>
       </div>
 
-      {/* BINGO Banner */}
-      <div className={`text-white text-center py-3 ${hasBingo ? "bg-yellow-500 animate-pulse" : "bg-red-500"}`}>
-        <div className="text-2xl font-bold">{hasBingo ? "🎉 BINGO! 🎉" : "BINGO!"}</div>
-      </div>
-
       {/* Bottom Buttons */}
       <div className="flex justify-center gap-6 py-4">
         <Button
-          onClick={resetGame}
+          onClick={fetchGameState}
           disabled={isLoading}
           className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-8 py-3 rounded-full text-base"
         >
           <RefreshCw className={`h-4 w-4 mr-2 ${isLoading ? "animate-spin" : ""}`} />
-          Restart Game
+          Refresh
         </Button>
         <Button
           onClick={onBack}
@@ -734,6 +995,11 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         >
           Leave
         </Button>
+      </div>
+
+      {/* BINGO Banner */}
+      <div className={`text-white text-center py-3 ${hasBingo ? "bg-yellow-500 animate-pulse" : "bg-red-500"}`}>
+        <div className="text-2xl font-bold">{hasBingo ? "🎉 BINGO! 🎉" : "BINGO!"}</div>
       </div>
 
       {/* Result Screen Overlay - Rendered as overlay when showResultScreen is true */}

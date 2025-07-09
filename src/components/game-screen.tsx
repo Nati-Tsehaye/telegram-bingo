@@ -23,7 +23,7 @@ interface GameScreenProps {
 }
 
 export default function GameScreen({ room, onBack }: GameScreenProps) {
-  const { user, webApp } = useTelegram()
+  const { user, webApp, guestId } = useTelegram()
   const [selectedBoardNumber, setSelectedBoardNumber] = useState<number | null>(null)
   const [selectedBoard, setSelectedBoard] = useState<BingoBoard | null>(null)
   const [gameStatus, setGameStatus] = useState<"waiting" | "active" | "starting">("waiting")
@@ -32,7 +32,20 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   const [boardSelections, setBoardSelections] = useState<BoardSelection[]>([])
   const [isLoading, setIsLoading] = useState(false)
 
-  const playerId = user?.id?.toString() || `guest-${Date.now()}`
+  // Get consistent player ID - use Telegram user ID or persistent guest ID
+  const getPlayerId = useCallback(() => {
+    if (user?.id) {
+      return user.id.toString()
+    }
+    if (guestId) {
+      return guestId
+    }
+    // Fallback - this should rarely happen now
+    console.warn("No user ID or guest ID available, using fallback")
+    return `fallback-${Date.now()}`
+  }, [user?.id, guestId])
+
+  const playerId = getPlayerId()
   const playerName = user?.first_name || "Guest Player"
 
   // Generate numbers 1-100 in a 10x10 grid
@@ -96,6 +109,20 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   const handleRefresh = () => {
     fetchBoardSelections()
   }
+
+  // Enhanced back handler that properly leaves the room
+  const handleBack = useCallback(async () => {
+    try {
+      console.log("🔙 Back button pressed, leaving room...")
+
+      // Call the parent onBack function which should handle leaving the room
+      onBack()
+    } catch (error) {
+      console.error("Error in handleBack:", error)
+      // Still call onBack even if there's an error
+      onBack()
+    }
+  }, [onBack])
 
   const handleNumberClick = async (number: number) => {
     if (isLoading) return
@@ -202,7 +229,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     }
   }
 
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     if (!selectedBoard) {
       webApp?.showAlert("Please select a board number before starting the game!")
       return
@@ -210,6 +237,29 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
     setGameStatus("starting")
     setActiveGames(1)
+
+    // Reset any previous game state by calling the reset API first
+    try {
+      console.log("🔄 Resetting game state before starting new game...")
+      const resetResponse = await fetch("/api/game-state", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          roomId: room.id,
+          action: "reset-game",
+        }),
+      })
+
+      if (resetResponse.ok) {
+        console.log("✅ Game state reset successfully")
+      } else {
+        console.warn("⚠️ Failed to reset game state, continuing anyway")
+      }
+    } catch (error) {
+      console.warn("⚠️ Error resetting game state:", error)
+    }
 
     // Show the bingo game after a short delay
     setTimeout(() => {
@@ -247,7 +297,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
   // Show the bingo game if started
   if (showBingoGame && selectedBoard) {
-    return <BingoGame room={room} selectedBoard={selectedBoard} onBack={onBack} />
+    return <BingoGame room={room} selectedBoard={selectedBoard} onBack={handleBack} />
   }
 
   return (
@@ -355,7 +405,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
       {/* Back button */}
       <button
-        onClick={onBack}
+        onClick={handleBack}
         className="fixed top-4 left-4 text-white/60 hover:text-white"
         style={{ fontSize: "24px" }}
       >

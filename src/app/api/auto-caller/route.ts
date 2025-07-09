@@ -10,28 +10,48 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
+    console.log(`🎯 Auto-caller called for room: ${roomId}`)
+
     // Check if auto calling is still active for this room
     const isActive = await GameStateManager.isNumberCallingActive(roomId)
     if (!isActive) {
+      console.log(`⏹️ Auto calling not active for room ${roomId}`)
       return NextResponse.json({ message: "Auto calling not active" })
     }
 
     const gameState = await GameStateManager.getGameState(roomId)
-    if (!gameState || gameState.gameStatus !== "active") {
+    if (!gameState) {
+      console.log(`❌ No game state found for room ${roomId}`)
+      return NextResponse.json({ message: "Game state not found" })
+    }
+
+    if (gameState.gameStatus !== "active") {
+      console.log(`⏹️ Game not active for room ${roomId}, status: ${gameState.gameStatus}`)
       return NextResponse.json({ message: "Game not active" })
+    }
+
+    // Check if all numbers have been called
+    const calledCount = gameState.calledNumbers?.length || 0
+    if (calledCount >= 75) {
+      console.log(`🏁 All numbers called for room ${roomId}`)
+      gameState.gameStatus = "finished"
+      await GameStateManager.setGameState(roomId, gameState)
+      return NextResponse.json({ message: "All numbers called, game finished" })
     }
 
     // Call next number
     const newNumber = await GameStateManager.callNextNumber(roomId)
 
     if (newNumber) {
-      console.log(`Auto-called number ${newNumber} for room ${roomId}`)
+      console.log(`📢 Auto-called number ${newNumber} for room ${roomId}`)
       return NextResponse.json({
         success: true,
         calledNumber: newNumber,
         message: `Called number ${newNumber}`,
+        totalCalled: calledCount + 1,
       })
     } else {
+      console.log(`⚠️ No number returned for room ${roomId}`)
       return NextResponse.json({ message: "No more numbers to call or game finished" })
     }
   } catch (error) {

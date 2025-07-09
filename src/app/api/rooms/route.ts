@@ -24,7 +24,7 @@ async function initializeRooms() {
     const existingRooms = await GameStateManager.getAllRooms()
     console.log("📊 Found existing rooms:", existingRooms.length)
 
-    // If we have rooms, just return - don't try to create more
+    // If we have rooms after cleanup, just return
     if (existingRooms.length > 0) {
       console.log("✅ Using existing rooms, skipping initialization")
       return
@@ -155,31 +155,77 @@ export async function GET(request: Request) {
 
     console.log("📊 Valid rooms:", validRooms.length)
 
-    const roomSummaries: GameRoomSummary[] = validRooms.map((room) => ({
-      id: room.id,
-      stake: room.stake,
-      players: Array.isArray(room.players) ? room.players.length : 0,
-      maxPlayers: room.maxPlayers || 100,
-      status: room.status || "waiting",
-      prize: (Array.isArray(room.players) ? room.players.length : 0) * room.stake,
-      createdAt:
-        room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
-      activeGames: room.activeGames || 0,
-      hasBonus: room.hasBonus !== false,
-      gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
-      calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
-      currentNumber: room.currentNumber,
-    }))
+    // Collect all current active player IDs from all rooms (for aggressive cleanup)
+    const currentActivePlayerIds = new Set<string>()
+    const now = new Date()
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000) // Only 5 minutes for very recent activity
 
-    const totalPlayers = roomSummaries.reduce((sum, room) => sum + room.players, 0)
+    validRooms.forEach((room) => {
+      if (Array.isArray(room.players)) {
+        room.players.forEach((player) => {
+          if (player && player.id && player.joinedAt) {
+            const joinedAt = player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt)
+            // Only consider very recent players as "active"
+            if (joinedAt > fiveMinutesAgo) {
+              currentActivePlayerIds.add(player.id)
+            }
+          }
+        })
+      }
+    })
 
-    console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalPlayers, "total players")
+    console.log("🔍 Current active player IDs (last 5 min):", Array.from(currentActivePlayerIds))
+
+    // Run aggressive ghost cleanup - remove ALL guest players except current active ones
+    const cleanupResult = await GameStateManager.aggressiveGhostCleanup(currentActivePlayerIds)
+    console.log("🔥 Aggressive cleanup result:", cleanupResult)
+
+    // Fetch rooms again after cleanup
+    const cleanedRooms = await GameStateManager.getAllRooms()
+    const cleanedValidRooms = cleanedRooms.filter(
+      (room) => room && typeof room === "object" && room.id && typeof room.stake === "number",
+    )
+
+    // Generate room summaries with only active players
+    const roomSummaries: GameRoomSummary[] = cleanedValidRooms.map((room) => {
+      // Count only very recent players (last 5 minutes)
+      let activePlayers = 0
+      if (Array.isArray(room.players)) {
+        activePlayers = room.players.filter((player) => {
+          if (!player || !player.joinedAt) return false
+          const joinedAt = player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt)
+          return joinedAt > fiveMinutesAgo
+        }).length
+      }
+
+      return {
+        id: room.id,
+        stake: room.stake,
+        players: activePlayers, // Use cleaned count
+        maxPlayers: room.maxPlayers || 100,
+        status: room.status || "waiting",
+        prize: activePlayers * room.stake, // Recalculate prize based on active players
+        createdAt:
+          room.createdAt instanceof Date ? room.createdAt.toISOString() : room.createdAt || new Date().toISOString(),
+        activeGames: room.activeGames || 0,
+        hasBonus: room.hasBonus !== false,
+        gameStartTime: room.gameStartTime instanceof Date ? room.gameStartTime.toISOString() : room.gameStartTime,
+        calledNumbers: Array.isArray(room.calledNumbers) ? room.calledNumbers : [],
+        currentNumber: room.currentNumber,
+      }
+    })
+
+    // Calculate total unique ACTIVE players across all rooms (very recent only)
+    const totalActivePlayers = currentActivePlayerIds.size
+
+    console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalActivePlayers, "active players")
+    console.log("🔍 Final active player IDs:", Array.from(currentActivePlayerIds))
 
     return NextResponse.json(
       {
         success: true,
         rooms: roomSummaries,
-        totalPlayers,
+        totalPlayers: totalActivePlayers,
         timestamp: new Date().toISOString(),
       },
       {
@@ -208,7 +254,7 @@ export async function POST(request: Request) {
     const { action, roomId, playerId, playerData }: JoinRoomRequest = await request.json()
     const clientIp = request.headers.get("x-forwarded-for") || request.headers.get("x-real-ip") || "unknown"
 
-    console.log("🚀 POST /api/rooms called with action:", action)
+    console.log("🚀 POST /api/rooms called with action:", action, "playerId:", playerId)
 
     // Rate limiting
     const canProceed = await RateLimiter.checkLimit(`action:${clientIp}`, 20, 60)
@@ -256,7 +302,26 @@ export async function POST(request: Request) {
           )
         }
 
-        if ((room.players?.length || 0) >= room.maxPlayers) {
+        // Run aggressive cleanup before joining - protect only the current player
+        const protectedPlayerIds = new Set([playerId])
+        await GameStateManager.aggressiveGhostCleanup(protectedPlayerIds)
+
+        // Fetch room again after cleanup
+        const cleanedRoom = await GameStateManager.getRoom(roomId)
+        if (!cleanedRoom) {
+          return NextResponse.json(
+            {
+              success: false,
+              error: "Room not found after cleanup",
+            },
+            {
+              status: 404,
+              headers: corsHeaders,
+            },
+          )
+        }
+
+        if ((cleanedRoom.players?.length || 0) >= cleanedRoom.maxPlayers) {
           return NextResponse.json(
             {
               success: false,
@@ -269,7 +334,7 @@ export async function POST(request: Request) {
           )
         }
 
-        if (room.status !== "waiting") {
+        if (cleanedRoom.status !== "waiting") {
           return NextResponse.json(
             {
               success: false,
@@ -283,12 +348,15 @@ export async function POST(request: Request) {
         }
 
         // Check if player is already in this room
-        const existingPlayer = room.players?.find((p: Player) => p.id === playerId)
+        const existingPlayer = cleanedRoom.players?.find((p: Player) => p.id === playerId)
         if (existingPlayer) {
+          console.log("🔄 Player already in room, updating session")
+          // Update player session to ensure it's tracked
+          await GameStateManager.setPlayerSession(playerId, roomId)
           return NextResponse.json(
             {
               success: true,
-              room,
+              room: cleanedRoom,
               message: "Already in room",
             },
             {
@@ -297,35 +365,28 @@ export async function POST(request: Request) {
           )
         }
 
-        // Remove player from other rooms first
-        const currentRoomId = await GameStateManager.getPlayerSession(playerId)
-        if (currentRoomId && currentRoomId !== roomId) {
-          const currentRoom = await GameStateManager.getRoom(currentRoomId as string)
-          if (currentRoom) {
-            currentRoom.players = currentRoom.players?.filter((p: Player) => p.id !== playerId) || []
-            currentRoom.prize = (currentRoom.players?.length || 0) * currentRoom.stake
-            await GameStateManager.setRoom(currentRoomId as string, currentRoom)
-          }
-        }
+        // Remove player from other rooms first (but protect this player ID)
+        console.log("🧹 Cleaning up player from other rooms...")
+        await GameStateManager.removePlayerFromAllRooms(playerId)
 
         // Add player to new room
         const player: Player = {
           id: playerId,
           name: playerData?.name || "Guest Player",
           telegramId: playerData?.telegramId,
-          joinedAt: new Date(),
+          joinedAt: new Date(), // Always use current time for new joins
         }
 
-        room.players = room.players || []
-        room.players.push(player)
-        room.prize = room.players.length * room.stake
+        cleanedRoom.players = cleanedRoom.players || []
+        cleanedRoom.players.push(player)
+        cleanedRoom.prize = cleanedRoom.players.length * cleanedRoom.stake
 
         // Auto-start logic
         const minPlayers = 2
-        const autoStartThreshold = Math.min(room.maxPlayers * 0.1, 10)
+        const autoStartThreshold = Math.min(cleanedRoom.maxPlayers * 0.1, 10)
 
-        if (room.players.length >= minPlayers && room.players.length >= autoStartThreshold) {
-          room.status = "starting"
+        if (cleanedRoom.players.length >= minPlayers && cleanedRoom.players.length >= autoStartThreshold) {
+          cleanedRoom.status = "starting"
 
           // Schedule game start
           setTimeout(async () => {
@@ -342,13 +403,15 @@ export async function POST(request: Request) {
           }, 10000)
         }
 
-        await GameStateManager.setRoom(roomId, room)
+        await GameStateManager.setRoom(roomId, cleanedRoom)
         await GameStateManager.setPlayerSession(playerId, roomId)
+
+        console.log("✅ Player joined room successfully:", playerId, "->", roomId)
 
         return NextResponse.json(
           {
             success: true,
-            room,
+            room: cleanedRoom,
             message: "Joined room successfully",
           },
           {
@@ -357,26 +420,57 @@ export async function POST(request: Request) {
         )
 
       case "leave":
+        console.log("👋 Player leaving:", playerId)
+
+        // Get player's current room
         const playerRoomId = await GameStateManager.getPlayerSession(playerId)
         if (playerRoomId) {
+          console.log("🏠 Found player in room:", playerRoomId)
           const playerRoom = await GameStateManager.getRoom(playerRoomId as string)
           if (playerRoom) {
+            // Remove player from room
+            const originalPlayerCount = playerRoom.players?.length || 0
             playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
             playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
 
-            // Reset room if empty
+            console.log(`🔢 Player count: ${originalPlayerCount} -> ${playerRoom.players.length}`)
+
+            // Reset room if empty or if it was the last player
             if (playerRoom.players.length === 0) {
+              console.log("🔄 Resetting room to waiting state (empty)")
               playerRoom.status = "waiting"
               playerRoom.activeGames = 0
               playerRoom.calledNumbers = []
               playerRoom.currentNumber = undefined
+              playerRoom.gameStartTime = undefined
+
+              // Also reset the game state in Redis
+              await GameStateManager.resetGameState(playerRoomId as string)
+            } else if (originalPlayerCount > 0 && playerRoom.players.length < 2) {
+              // If we go below minimum players, reset the game
+              console.log("🔄 Resetting room due to insufficient players")
+              playerRoom.status = "waiting"
+              playerRoom.activeGames = 0
+              playerRoom.calledNumbers = []
+              playerRoom.currentNumber = undefined
+              playerRoom.gameStartTime = undefined
+
+              // Also reset the game state in Redis
+              await GameStateManager.resetGameState(playerRoomId as string)
             }
 
             await GameStateManager.setRoom(playerRoomId as string, playerRoom)
+            console.log("✅ Updated room after player left")
           }
         }
 
+        // Remove player session
         await GameStateManager.removePlayerSession(playerId)
+        console.log("🗑️ Removed player session")
+
+        // Also remove board selections for this player from all rooms
+        console.log("🧹 Cleaning up board selections for player:", playerId)
+        await GameStateManager.removePlayerFromAllBoardSelections(playerId)
 
         return NextResponse.json(
           {

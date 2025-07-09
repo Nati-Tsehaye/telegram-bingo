@@ -101,12 +101,14 @@ interface TelegramContextType {
   webApp: TelegramWebApp | null
   user: TelegramUser | null
   isReady: boolean
+  guestId: string | null // Add guestId to context
 }
 
 const TelegramContext = createContext<TelegramContextType>({
   webApp: null,
   user: null,
   isReady: false,
+  guestId: null,
 })
 
 export const useTelegram = () => {
@@ -121,10 +123,46 @@ interface TelegramProviderProps {
   children: ReactNode
 }
 
+// Helper function to generate a persistent guest ID
+function getOrCreateGuestId(): string {
+  const GUEST_ID_KEY = "arada_bingo_guest_id"
+
+  // Try to get existing guest ID from localStorage
+  if (typeof window !== "undefined") {
+    try {
+      const existingId = localStorage.getItem(GUEST_ID_KEY)
+      if (existingId) {
+        console.log("🔄 Using existing guest ID:", existingId)
+        return existingId
+      }
+    } catch (error) {
+      console.warn("Failed to read from localStorage:", error)
+    }
+  }
+
+  // Generate new guest ID with timestamp and random component
+  const timestamp = Date.now()
+  const random = Math.random().toString(36).substring(2, 8)
+  const newGuestId = `guest-${timestamp}-${random}`
+
+  // Save to localStorage
+  if (typeof window !== "undefined") {
+    try {
+      localStorage.setItem(GUEST_ID_KEY, newGuestId)
+      console.log("✨ Created new guest ID:", newGuestId)
+    } catch (error) {
+      console.warn("Failed to save to localStorage:", error)
+    }
+  }
+
+  return newGuestId
+}
+
 export default function TelegramProvider({ children }: TelegramProviderProps) {
   const [webApp, setWebApp] = useState<TelegramWebApp | null>(null)
   const [user, setUser] = useState<TelegramUser | null>(null)
   const [isReady, setIsReady] = useState(false)
+  const [guestId, setGuestId] = useState<string | null>(null)
 
   useEffect(() => {
     if (typeof window !== "undefined") {
@@ -169,6 +207,13 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
 
         setWebApp(tg)
         setUser(tg.initDataUnsafe?.user || null)
+
+        // Set guest ID only if no Telegram user
+        if (!tg.initDataUnsafe?.user) {
+          const persistentGuestId = getOrCreateGuestId()
+          setGuestId(persistentGuestId)
+        }
+
         setIsReady(true)
 
         // Handle viewport changes
@@ -189,10 +234,12 @@ export default function TelegramProvider({ children }: TelegramProviderProps) {
       } else {
         // For development/testing outside Telegram
         console.warn("Telegram WebApp not available. Running in development mode.")
+        const persistentGuestId = getOrCreateGuestId()
+        setGuestId(persistentGuestId)
         setIsReady(true)
       }
     }
   }, [])
 
-  return <TelegramContext.Provider value={{ webApp, user, isReady }}>{children}</TelegramContext.Provider>
+  return <TelegramContext.Provider value={{ webApp, user, isReady, guestId }}>{children}</TelegramContext.Provider>
 }
