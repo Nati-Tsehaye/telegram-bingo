@@ -21,17 +21,8 @@ async function initializeRooms() {
       throw new Error("Redis connection failed")
     }
 
-    const existingRooms = await GameStateManager.getAllRooms()
-    console.log("📊 Found existing rooms:", existingRooms.length)
-
-    // If we have rooms after cleanup, just return
-    if (existingRooms.length > 0) {
-      console.log("✅ Using existing rooms, skipping initialization")
-      return
-    }
-
-    console.log("🏗️ Creating default rooms...")
-    const stakes = [10, 20, 50, 100, 200, 500]
+    console.log("🏗️ Ensuring all required rooms exist...")
+    const stakes = [10, 20, 30, 50, 100]
 
     for (const stake of stakes) {
       const roomId = `room-${stake}`
@@ -64,7 +55,17 @@ async function initializeRooms() {
         // Don't throw here, continue with other rooms
       }
     }
-    console.log("🎉 Room creation process completed!")
+
+    // Verify all rooms exist
+    const allRooms = await GameStateManager.getAllRooms()
+    const roomStakes = allRooms.map((room) => room.stake).sort((a, b) => a - b)
+    console.log(`📊 Current room stakes: [${roomStakes.join(", ")}]`)
+
+    if (roomStakes.length < 5) {
+      console.log(`⚠️ Only ${roomStakes.length} rooms found, expected 5`)
+    } else {
+      console.log("🎉 All 5 rooms verified!")
+    }
   } catch (error) {
     console.error("❌ Error initializing rooms:", error)
     // Don't throw the error, just log it and continue
@@ -100,7 +101,7 @@ export async function GET(request: Request) {
       )
     }
 
-    // Try to initialize rooms, but don't fail if it doesn't work
+    // Always try to initialize rooms to ensure all 5 exist
     try {
       console.log("🔧 Initializing rooms...")
       await initializeRooms()
@@ -112,39 +113,33 @@ export async function GET(request: Request) {
     const rooms = await GameStateManager.getAllRooms()
     console.log("📊 Total rooms found:", rooms.length)
 
-    // If no rooms exist, create a minimal fallback room
-    if (rooms.length === 0) {
-      console.log("🆘 No rooms found, creating emergency fallback room...")
-      try {
-        const fallbackRoom: GameRoom = {
-          id: "room-emergency-10",
-          stake: 10,
-          players: [],
-          maxPlayers: 100,
-          status: "waiting",
-          prize: 0,
-          createdAt: new Date(),
-          activeGames: 0,
-          hasBonus: true,
+    // If we still don't have enough rooms, create emergency fallback rooms
+    if (rooms.length < 5) {
+      console.log(`🆘 Only ${rooms.length} rooms found, creating missing emergency rooms...`)
+      const stakes = [10, 20, 30, 50, 100]
+      const existingStakes = new Set(rooms.map((room) => room.stake))
+
+      for (const stake of stakes) {
+        if (!existingStakes.has(stake)) {
+          try {
+            const fallbackRoom: GameRoom = {
+              id: `room-emergency-${stake}`,
+              stake,
+              players: [],
+              maxPlayers: 100,
+              status: "waiting",
+              prize: 0,
+              createdAt: new Date(),
+              activeGames: 0,
+              hasBonus: true,
+            }
+            await GameStateManager.setRoom(`room-emergency-${stake}`, fallbackRoom)
+            rooms.push(fallbackRoom)
+            console.log(`✅ Created emergency room for stake ${stake}`)
+          } catch (error) {
+            console.error(`❌ Failed to create emergency room for stake ${stake}:`, error)
+          }
         }
-        await GameStateManager.setRoom("room-emergency-10", fallbackRoom)
-        rooms.push(fallbackRoom)
-        console.log("✅ Created emergency fallback room")
-      } catch (error) {
-        console.error("❌ Failed to create emergency room:", error)
-        // Return empty rooms list instead of failing
-        return NextResponse.json(
-          {
-            success: true,
-            rooms: [],
-            totalPlayers: 0,
-            timestamp: new Date().toISOString(),
-            message: "No rooms available, please try again later",
-          },
-          {
-            headers: corsHeaders,
-          },
-        )
       }
     }
 
@@ -215,10 +210,14 @@ export async function GET(request: Request) {
       }
     })
 
+    // Sort rooms by stake for consistent ordering
+    roomSummaries.sort((a, b) => a.stake - b.stake)
+
     // Calculate total unique ACTIVE players across all rooms (very recent only)
     const totalActivePlayers = currentActivePlayerIds.size
 
     console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalActivePlayers, "active players")
+    console.log("🏠 Room stakes:", roomSummaries.map((r) => r.stake).join(", "))
     console.log("🔍 Final active player IDs:", Array.from(currentActivePlayerIds))
 
     return NextResponse.json(
