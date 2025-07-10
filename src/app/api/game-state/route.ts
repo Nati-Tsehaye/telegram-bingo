@@ -2,6 +2,61 @@ import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 import type { GameStateRequest, Winner } from "@/types/game"
 
+// Centralized number calling - only one instance per room
+const activeCallers = new Map<string, NodeJS.Timeout>()
+
+function startCentralizedNumberCalling(roomId: string) {
+  // Clear any existing caller for this room
+  if (activeCallers.has(roomId)) {
+    clearInterval(activeCallers.get(roomId)!)
+    activeCallers.delete(roomId)
+  }
+
+  console.log(`🎯 Starting centralized number calling for room: ${roomId}`)
+
+  const callNumber = async () => {
+    try {
+      const gameState = await GameStateManager.getGameState(roomId)
+      if (!gameState || gameState.gameStatus !== "active") {
+        console.log(`⏹️ Stopping number calling for room ${roomId} - game not active`)
+        if (activeCallers.has(roomId)) {
+          clearInterval(activeCallers.get(roomId)!)
+          activeCallers.delete(roomId)
+        }
+        return
+      }
+
+      // Check if all numbers have been called
+      const calledCount = gameState.calledNumbers?.length || 0
+      if (calledCount >= 75) {
+        console.log(`🏁 All numbers called for room ${roomId}`)
+        gameState.gameStatus = "finished"
+        await GameStateManager.setGameState(roomId, gameState)
+
+        // Stop calling
+        if (activeCallers.has(roomId)) {
+          clearInterval(activeCallers.get(roomId)!)
+          activeCallers.delete(roomId)
+        }
+        return
+      }
+
+      // Call next number
+      const newNumber = await GameStateManager.callNextNumber(roomId)
+      if (newNumber) {
+        console.log(`📢 Centrally called number ${newNumber} for room ${roomId}`)
+      }
+    } catch (error) {
+      console.error(`Error in centralized number calling for room ${roomId}:`, error)
+    }
+  }
+
+  // Call first number after 3 seconds, then every 5 seconds
+  setTimeout(callNumber, 3000)
+  const interval = setInterval(callNumber, 5000)
+  activeCallers.set(roomId, interval)
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url)
@@ -86,7 +141,9 @@ export async function POST(request: Request) {
           }
 
           await GameStateManager.setGameState(roomId, gameState)
-          await GameStateManager.scheduleNumberCalling(roomId)
+
+          // Start centralized number calling for this room
+          startCentralizedNumberCalling(roomId)
 
           console.log(`🎮 Game started for room ${roomId}, status: ${gameState.gameStatus}`)
         } else {
@@ -122,6 +179,12 @@ export async function POST(request: Request) {
         break
 
       case "reset-game":
+        // Stop any active number calling
+        if (activeCallers.has(roomId)) {
+          clearInterval(activeCallers.get(roomId)!)
+          activeCallers.delete(roomId)
+        }
+
         gameState = {
           roomId,
           calledNumbers: [],

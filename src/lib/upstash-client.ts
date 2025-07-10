@@ -27,13 +27,13 @@ export const redis = new Redis({
 
 // Game state management with Redis
 export class GameStateManager {
-  // Store game state in Redis with TTL and broadcast to all players
+  // Store game state in Redis with TTL
   static async setGameState(roomId: string, state: unknown) {
     try {
       console.log(`💾 Setting game state for room ${roomId}:`, state)
       await redis.setex(`game:${roomId}`, 3600, JSON.stringify(state)) // 1 hour TTL
 
-      // Publish update to ALL subscribers in this room
+      // Publish update to subscribers
       await redis.publish(
         `room:${roomId}`,
         JSON.stringify({
@@ -42,7 +42,7 @@ export class GameStateManager {
           timestamp: new Date().toISOString(),
         }),
       )
-      console.log(`✅ Game state set and broadcasted to all players in room ${roomId}`)
+      console.log(`✅ Game state set and published for room ${roomId}`)
     } catch (error) {
       console.error(`Error setting game state for room ${roomId}:`, error)
       throw new Error(`Failed to set game state: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -844,10 +844,10 @@ export class GameStateManager {
     }
   }
 
-  // CENTRALIZED NUMBER CALLING - Only the server calls numbers, broadcasts to all players
+  // Game number calling with auto-increment - FIXED VERSION
   static async callNextNumber(roomId: string) {
     try {
-      console.log(`🎲 [SERVER] Calling next number for room: ${roomId}`)
+      console.log(`🎲 Calling next number for room: ${roomId}`)
 
       let gameState = await this.getGameState(roomId)
       if (!gameState) {
@@ -880,15 +880,15 @@ export class GameStateManager {
         (num) => !gameState.calledNumbers.includes(num),
       )
 
-      console.log(`📊 [SERVER] Available numbers for room ${roomId}: ${availableNumbers.length}/75`)
-      console.log(`📋 [SERVER] Already called: [${gameState.calledNumbers.join(", ")}]`)
+      console.log(`📊 Available numbers for room ${roomId}: ${availableNumbers.length}/75`)
+      console.log(`📋 Already called: [${gameState.calledNumbers.join(", ")}]`)
 
       if (availableNumbers.length === 0) {
         // Game over - all numbers called
-        console.log(`🏁 [SERVER] All numbers called for room ${roomId}, finishing game`)
+        console.log(`🏁 All numbers called for room ${roomId}, finishing game`)
         gameState.gameStatus = "finished"
         gameState.lastUpdate = new Date().toISOString()
-        await this.setGameState(roomId, gameState) // This will broadcast to all players
+        await this.setGameState(roomId, gameState)
         return null
       }
 
@@ -896,35 +896,33 @@ export class GameStateManager {
       const randomIndex = Math.floor(Math.random() * availableNumbers.length)
       const newNumber = availableNumbers[randomIndex]
 
-      console.log(`🎯 [SERVER] Selected number: ${newNumber} (${randomIndex + 1}/${availableNumbers.length} available)`)
+      console.log(`🎯 Selected number: ${newNumber} (${randomIndex + 1}/${availableNumbers.length} available)`)
 
       // Update game state
       gameState.currentNumber = newNumber
       gameState.calledNumbers.push(newNumber)
       gameState.lastUpdate = new Date().toISOString()
 
-      console.log(`📢 [SERVER] Broadcasting number ${newNumber} to ALL players in room ${roomId}`)
-
-      // This will broadcast the updated game state to ALL players in the room
+      console.log(`💾 Updating game state for room ${roomId} with new number ${newNumber}`)
       await this.setGameState(roomId, gameState)
 
-      console.log(`✅ [SERVER] Successfully called and broadcasted number ${newNumber} for room ${roomId}`)
-      console.log(`📊 [SERVER] Total called: ${gameState.calledNumbers.length}/75`)
+      console.log(`✅ Successfully called number ${newNumber} for room ${roomId}`)
+      console.log(`📊 Total called: ${gameState.calledNumbers.length}/75`)
 
       return newNumber
     } catch (error) {
-      console.error(`❌ [SERVER] Error calling next number for room ${roomId}:`, error)
+      console.error(`❌ Error calling next number for room ${roomId}:`, error)
       return null
     }
   }
 
-  // Auto number calling scheduler - Enhanced for centralized calling
+  // Auto number calling scheduler
   static async scheduleNumberCalling(roomId: string) {
     try {
-      console.log(`⏰ [SERVER] Scheduling centralized number calling for room ${roomId}`)
+      console.log(`⏰ Scheduling number calling for room ${roomId}`)
       const key = `scheduler:${roomId}`
       await redis.setex(key, 300, "active") // 5 minutes TTL
-      console.log(`✅ [SERVER] Centralized number calling scheduled for room ${roomId}`)
+      console.log(`✅ Number calling scheduled for room ${roomId}`)
     } catch (error) {
       console.error(`Error scheduling number calling for room ${roomId}:`, error)
     }
@@ -934,7 +932,7 @@ export class GameStateManager {
     try {
       const key = `scheduler:${roomId}`
       const exists = await redis.exists(key)
-      console.log(`🔍 [SERVER] Number calling active for room ${roomId}: ${exists ? "YES" : "NO"}`)
+      console.log(`🔍 Number calling active for room ${roomId}: ${exists ? "YES" : "NO"}`)
       return exists
     } catch (error) {
       console.error(`Error checking number calling status for room ${roomId}:`, error)

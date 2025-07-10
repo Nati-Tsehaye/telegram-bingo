@@ -67,6 +67,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
 
   // Audio ref for playing number sounds
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const intervalRef = useRef<NodeJS.Timeout | null>(null)
 
   const bingoLetters = ["B", "I", "N", "G", "O"]
   const letterColors = ["bg-yellow-500", "bg-green-500", "bg-blue-500", "bg-orange-500", "bg-purple-500"]
@@ -383,10 +384,26 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     }
   }, [room.id])
 
-  // REMOVED: Manual number calling - players no longer call numbers
-  // The server now handles all number calling centrally
+  // Polling function to sync with server game state
+  const pollGameState = useCallback(() => {
+    console.log(`🔄 Polling game state for room: ${room.id}`)
 
-  // Start game function - only starts the game, doesn't call numbers
+    const poll = async () => {
+      try {
+        await fetchGameState()
+      } catch (error) {
+        console.error("Error polling game state:", error)
+      }
+    }
+
+    // Poll every 2 seconds to stay in sync
+    const pollInterval = setInterval(poll, 2000)
+
+    return () => {
+      clearInterval(pollInterval)
+    }
+  }, [fetchGameState, room.id])
+
   const startGame = useCallback(async () => {
     try {
       setIsLoading(true)
@@ -408,8 +425,12 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         setGameState(data.gameState)
         console.log("✅ Game started, status:", data.gameState.gameStatus)
 
-        // The server will handle number calling automatically via cron job
-        // No need to start manual number calling here
+        // Start polling for game state updates instead of auto-calling
+        if (data.gameState.gameStatus === "active") {
+          setTimeout(() => {
+            pollGameState()
+          }, 1000)
+        }
       } else {
         console.error("Failed to start game:", data.error)
       }
@@ -418,13 +439,19 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     } finally {
       setIsLoading(false)
     }
-  }, [room.id])
+  }, [room.id, pollGameState])
 
   // Reset/restart the game
   const resetGame = useCallback(async () => {
     try {
       setIsLoading(true)
       setShowResultScreen(false)
+
+      // Clear any running intervals
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
 
       const response = await fetch("/api/game-state", {
         method: "POST",
@@ -440,7 +467,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
       const data = await response.json()
       if (data.success) {
         setGameState(data.gameState)
-        setRecentCalls([])
+        setRecentCalls([]) // Add this line to clear recent calls
         setLastPlayedNumber(null)
         setHasBingo(false)
         setBingoClaimed(false)
@@ -489,22 +516,33 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           if (data.gameState.gameStatus === "waiting") {
             console.log("🎮 Game is waiting, starting it...")
             await startGame()
+          } else if (data.gameState.gameStatus === "active") {
+            console.log("🎮 Game is already active, starting polling...")
+            pollGameState()
           }
-          // Note: No need to start auto calling here - the server cron job handles it
         }
       }, 1000)
     }
 
     initGame()
-  }, [room.id, fetchGameState, startGame])
 
+    // Cleanup on unmount
+    return () => {
+      if (intervalRef.current) {
+        clearInterval(intervalRef.current)
+        intervalRef.current = null
+      }
+    }
+  }, [room.id, fetchGameState, startGame, pollGameState])
+
+  // Add these imports at the top
   const { isConnected: _isConnected } = useRealtime(room.id, playerId)
 
-  // ENHANCED: Listen for server-broadcasted game state updates
+  // FIXED: Add event listener for game state updates with proper recent calls tracking
   useEffect(() => {
     const handleGameStateUpdate = (event: CustomEvent) => {
       const newGameState = event.detail
-      console.log("🔄 [CLIENT] Received server game state update:", newGameState)
+      console.log("🔄 Game state update received:", newGameState)
 
       // If this is a fresh game (no called numbers), clear recent calls
       if (!newGameState.calledNumbers || newGameState.calledNumbers.length === 0) {
@@ -512,26 +550,25 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         setLastPlayedNumber(null)
       }
 
-      // Check if there's a new number called by the server
+      // FIXED: Check if there's a new number called and play audio
       if (newGameState.currentNumber && newGameState.currentNumber !== gameState.currentNumber) {
-        console.log(
-          `🆕 [CLIENT] Server called new number: ${newGameState.currentNumber} (previous: ${gameState.currentNumber})`,
-        )
+        console.log(`🆕 New number detected: ${newGameState.currentNumber} (previous: ${gameState.currentNumber})`)
 
         // Only play if this number hasn't been played yet
         if (newGameState.currentNumber !== lastPlayedNumber) {
-          console.log(`🎵 [CLIENT] Playing audio for server-called number: ${newGameState.currentNumber}`)
+          console.log(`🎵 Playing audio for new number: ${newGameState.currentNumber}`)
           playNumberAudio(newGameState.currentNumber)
         } else {
-          console.log(`🔇 [CLIENT] Number ${newGameState.currentNumber} already played, skipping audio`)
+          console.log(`🔇 Number ${newGameState.currentNumber} already played, skipping audio`)
         }
 
-        // Update recent calls when we have a new current number
+        // FIXED: Update recent calls when we have a new current number
+        // Add the PREVIOUS current number to recent calls (not the new one)
         if (gameState.currentNumber !== null && gameState.currentNumber !== newGameState.currentNumber) {
-          console.log(`📝 [CLIENT] Adding ${gameState.currentNumber} to recent calls`)
+          console.log(`📝 Adding ${gameState.currentNumber} to recent calls`)
           setRecentCalls((prev) => {
-            const newRecent = [gameState.currentNumber!, ...prev.slice(0, 3)]
-            console.log(`📋 [CLIENT] Updated recent calls:`, newRecent)
+            const newRecent = [gameState.currentNumber!, ...prev.slice(0, 3)] // Keep only 3 previous + new one = 4 total
+            console.log(`📋 Updated recent calls:`, newRecent)
             return newRecent
           })
         }
@@ -539,6 +576,11 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
 
       // Check if game finished and show result screen
       if (newGameState.gameStatus === "finished" && gameState.gameStatus !== "finished") {
+        // Stop auto calling
+        if (intervalRef.current) {
+          clearInterval(intervalRef.current)
+          intervalRef.current = null
+        }
         setTimeout(() => {
           setShowResultScreen(true)
         }, 2000)
@@ -554,25 +596,25 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     }
   }, [gameState.currentNumber, gameState.gameStatus, lastPlayedNumber, playNumberAudio])
 
-  // Handle direct gameState updates for recent calls
+  // FIXED: Handle direct gameState updates for recent calls
   useEffect(() => {
     // When gameState.currentNumber changes directly, update recent calls
     if (gameState.currentNumber && gameState.calledNumbers.length > 1) {
       // Get the last 4 called numbers (excluding the current one) for recent calls
       const previousCalls = gameState.calledNumbers
-        .filter((num) => num !== gameState.currentNumber)
-        .slice(-4)
-        .reverse()
+        .filter((num) => num !== gameState.currentNumber) // Exclude current number
+        .slice(-4) // Get last 4
+        .reverse() // Most recent first
 
-      console.log(`📋 [CLIENT] Direct state update - setting recent calls:`, previousCalls)
+      console.log(`📋 Direct state update - setting recent calls:`, previousCalls)
       setRecentCalls(previousCalls)
     }
   }, [gameState.currentNumber, gameState.calledNumbers])
 
-  // Also check for current number changes when gameState updates directly
+  // FIXED: Also check for current number changes when gameState updates directly
   useEffect(() => {
     if (gameState.currentNumber && gameState.currentNumber !== lastPlayedNumber) {
-      console.log(`🎵 [CLIENT] Direct state update - playing audio for: ${gameState.currentNumber}`)
+      console.log(`🎵 Direct state update - playing audio for: ${gameState.currentNumber}`)
       playNumberAudio(gameState.currentNumber)
     }
   }, [gameState.currentNumber, lastPlayedNumber, playNumberAudio])
@@ -653,6 +695,19 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
     if (!isMuted && audioRef.current) {
       audioRef.current.pause()
       audioRef.current.currentTime = 0
+    }
+  }
+
+  // Test audio function for debugging
+  const _testAudio = () => {
+    console.log("🧪 Testing audio with current number:", gameState.currentNumber)
+    if (gameState.currentNumber) {
+      playNumberAudio(gameState.currentNumber)
+    } else {
+      // Test with a random number
+      const testNumber = Math.floor(Math.random() * 75) + 1
+      console.log("🧪 Testing with random number:", testNumber)
+      playNumberAudio(testNumber)
     }
   }
 
@@ -884,7 +939,7 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
         <div className="text-2xl font-bold">{hasBingo ? "🎉 BINGO! 🎉" : "BINGO!"}</div>
       </div>
 
-      {/* Result Screen Overlay */}
+      {/* Result Screen Overlay - Rendered as overlay when showResultScreen is true */}
       {showResultScreen && gameState.gameStatus === "finished" && (
         <BingoResultScreen
           isWinner={currentPlayerWon}

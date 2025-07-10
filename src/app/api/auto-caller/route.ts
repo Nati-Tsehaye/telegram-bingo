@@ -1,23 +1,26 @@
 import { NextResponse } from "next/server"
 import { GameStateManager } from "@/lib/upstash-client"
 
-// Manual number caller endpoint (for testing or manual triggers)
+// Auto number caller endpoint (called by cron job or scheduler)
 export async function POST(request: Request) {
   try {
-    const { roomId } = await request.json()
+    const { roomId, serverCall = false } = await request.json()
 
     if (!roomId) {
       return NextResponse.json({ error: "Room ID required" }, { status: 400 })
     }
 
-    console.log(`🎯 Manual number call requested for room: ${roomId}`)
-
-    // Check if auto calling is still active for this room
-    const isActive = await GameStateManager.isNumberCallingActive(roomId)
-    if (!isActive) {
-      console.log(`⏹️ Auto calling not active for room ${roomId}`)
-      return NextResponse.json({ message: "Auto calling not active" })
+    // Only allow server-side calls to prevent individual players from calling numbers
+    if (!serverCall) {
+      return NextResponse.json(
+        {
+          error: "Direct number calling not allowed. Numbers are called centrally by the server.",
+        },
+        { status: 403 },
+      )
     }
+
+    console.log(`🎯 Server auto-caller called for room: ${roomId}`)
 
     const gameState = await GameStateManager.getGameState(roomId)
     if (!gameState) {
@@ -39,11 +42,11 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "All numbers called, game finished" })
     }
 
-    // Call next number - this will broadcast to all players
+    // Call next number
     const newNumber = await GameStateManager.callNextNumber(roomId)
 
     if (newNumber) {
-      console.log(`📢 Manually called number ${newNumber} for room ${roomId}`)
+      console.log(`📢 Server called number ${newNumber} for room ${roomId}`)
       return NextResponse.json({
         success: true,
         calledNumber: newNumber,
@@ -55,7 +58,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ message: "No more numbers to call or game finished" })
     }
   } catch (error) {
-    console.error("Error in manual auto caller:", error)
+    console.error("Error in auto caller:", error)
     return NextResponse.json({ error: "Failed to call number" }, { status: 500 })
   }
 }
@@ -72,7 +75,6 @@ export async function GET() {
         id: room.id,
         status: room.status,
         players: room.players?.length || 0,
-        calledNumbers: room.calledNumbers?.length || 0,
       })),
     })
   } catch (error) {
