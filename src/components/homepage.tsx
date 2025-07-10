@@ -93,32 +93,6 @@ export default function Homepage() {
       setIsLoading(false)
     }
   }, [webApp])
-
-  // Add this function after the fetchRooms function
-  const updateRoomPlayerCount = useCallback((roomId: string, playerCount: number, playerChange: number) => {
-    setGameRooms((prevRooms) => {
-      return prevRooms.map((room) => {
-        if (room.id === roomId) {
-          const newPlayerCount = Math.max(0, playerCount)
-          return {
-            ...room,
-            players: newPlayerCount,
-            prize: newPlayerCount * room.stake,
-          }
-        }
-        return room
-      })
-    })
-
-    // Update total players
-    setTotalPlayers((prev) => Math.max(0, prev + playerChange))
-    setLastUpdate(new Date())
-
-    console.log(
-      `🔄 Updated room ${roomId} player count to ${playerCount} (change: ${playerChange > 0 ? "+" : ""}${playerChange})`,
-    )
-  }, [])
-
   // Add this function to show real-time update notifications
   const showRealtimeUpdate = useCallback((message: string) => {
     setRealtimeUpdates((prev) => {
@@ -208,7 +182,7 @@ export default function Homepage() {
     return () => {
       window.removeEventListener("globalRoomUpdate", handleGlobalRoomUpdate as EventListener)
     }
-  }, [fetchRooms, showRealtimeUpdate]) // Remove fetchRooms dependency to prevent unnecessary re-renders
+  }, [fetchRooms, showRealtimeUpdate])
 
   const handleRefresh = useCallback(() => {
     console.log("🔄 Manual refresh triggered")

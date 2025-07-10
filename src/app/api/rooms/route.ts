@@ -1,10 +1,10 @@
 import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
-import { RedisPubSub } from "@/lib/redis-pubsub"
+import { RedisPubSub, type GameEvent } from "@/lib/redis-pubsub"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
-// Add this helper function
-async function publishEvent(event: any) {
+// Add this helper function with proper typing
+async function publishEvent(event: Omit<GameEvent, "timestamp">) {
   try {
     await RedisPubSub.publishToRoom(event.roomId, event)
     await RedisPubSub.publishGlobal(event)
@@ -466,7 +466,6 @@ export async function POST(request: Request) {
             playerChange: +1,
             lastUpdate: new Date().toISOString(),
           },
-          timestamp: new Date().toISOString(),
           playerId,
         })
 
@@ -525,6 +524,26 @@ export async function POST(request: Request) {
 
             await GameStateManager.setRoom(playerRoomId as string, playerRoom)
             console.log("✅ Updated room after player left")
+
+            // Publish player left event
+            await publishEvent({
+              type: "player_left",
+              roomId: playerRoomId as string,
+              data: {
+                id: playerRoom.id,
+                stake: playerRoom.stake,
+                players: playerRoom.players,
+                playersCount: playerRoom.players.length,
+                maxPlayers: playerRoom.maxPlayers,
+                status: playerRoom.status,
+                prize: playerRoom.prize,
+                activeGames: playerRoom.activeGames,
+                hasBonus: playerRoom.hasBonus,
+                playerChange: -1,
+                lastUpdate: new Date().toISOString(),
+              },
+              playerId,
+            })
           }
         }
 
