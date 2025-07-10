@@ -20,6 +20,7 @@ export default function Homepage() {
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [error, setError] = useState<string | null>(null)
+  const [realtimeUpdates, setRealtimeUpdates] = useState<string[]>([])
 
   // Get consistent player ID - use Telegram user ID or persistent guest ID
   const getPlayerId = useCallback(() => {
@@ -93,6 +94,43 @@ export default function Homepage() {
     }
   }, [webApp])
 
+  // Add this function after the fetchRooms function
+  const updateRoomPlayerCount = useCallback((roomId: string, playerCount: number, playerChange: number) => {
+    setGameRooms((prevRooms) => {
+      return prevRooms.map((room) => {
+        if (room.id === roomId) {
+          const newPlayerCount = Math.max(0, playerCount)
+          return {
+            ...room,
+            players: newPlayerCount,
+            prize: newPlayerCount * room.stake,
+          }
+        }
+        return room
+      })
+    })
+
+    // Update total players
+    setTotalPlayers((prev) => Math.max(0, prev + playerChange))
+    setLastUpdate(new Date())
+
+    console.log(
+      `🔄 Updated room ${roomId} player count to ${playerCount} (change: ${playerChange > 0 ? "+" : ""}${playerChange})`,
+    )
+  }, [])
+
+  // Add this function to show real-time update notifications
+  const showRealtimeUpdate = useCallback((message: string) => {
+    setRealtimeUpdates((prev) => {
+      const newUpdates = [message, ...prev.slice(0, 2)] // Keep only last 3 updates
+      // Auto-remove after 3 seconds
+      setTimeout(() => {
+        setRealtimeUpdates((current) => current.filter((update) => update !== message))
+      }, 3000)
+      return newUpdates
+    })
+  }, [])
+
   // Load rooms when component mounts and when returning to lobby
   useEffect(() => {
     if (isReady && currentScreen === "lobby") {
@@ -101,19 +139,76 @@ export default function Homepage() {
     }
   }, [isReady, currentScreen, fetchRooms])
 
-  // Listen for global room updates via SSE
+  // Listen for global room updates via SSE - IMPROVED VERSION
   useEffect(() => {
-    const handleGlobalRoomUpdate = () => {
-      console.log("🔄 Global room update received, refreshing rooms...")
-      fetchRooms()
+    const handleGlobalRoomUpdate = (event: CustomEvent) => {
+      const eventData = event.detail
+      console.log("🔄 Global room update received:", eventData)
+
+      // Show real-time update notification
+      if (eventData && eventData.type && eventData.data) {
+        const roomStake = eventData.data.stake || "Unknown"
+        switch (eventData.type) {
+          case "player_joined":
+            showRealtimeUpdate(`Player joined ${roomStake} ETB room`)
+            break
+          case "player_left":
+            showRealtimeUpdate(`Player left ${roomStake} ETB room`)
+            break
+          case "room_updated":
+            showRealtimeUpdate(`Room ${roomStake} ETB updated`)
+            break
+        }
+      }
+
+      // Instead of full refresh, update specific room data
+      if (eventData && eventData.type) {
+        switch (eventData.type) {
+          case "player_joined":
+          case "player_left":
+          case "room_updated":
+            // Update specific room in the state
+            if (eventData.data && eventData.data.id) {
+              setGameRooms((prevRooms) => {
+                return prevRooms.map((room) => {
+                  if (room.id === eventData.data.id) {
+                    // Update the specific room with new data
+                    return {
+                      ...room,
+                      players: eventData.data.players?.length || room.players,
+                      prize: eventData.data.prize || room.prize,
+                      status: eventData.data.status || room.status,
+                      activeGames: eventData.data.activeGames || room.activeGames,
+                    }
+                  }
+                  return room
+                })
+              })
+
+              // Update total players count
+              setTotalPlayers((prev) => {
+                const change = eventData.type === "player_joined" ? 1 : eventData.type === "player_left" ? -1 : 0
+                return Math.max(0, prev + change)
+              })
+
+              setLastUpdate(new Date())
+              console.log(`✅ Updated room ${eventData.data.id} locally without full refresh`)
+            }
+            break
+          default:
+            // For other events, do a targeted refresh
+            console.log("🔄 Unknown event type, doing targeted refresh")
+            fetchRooms()
+        }
+      }
     }
 
-    window.addEventListener("globalRoomUpdate", handleGlobalRoomUpdate)
+    window.addEventListener("globalRoomUpdate", handleGlobalRoomUpdate as EventListener)
 
     return () => {
-      window.removeEventListener("globalRoomUpdate", handleGlobalRoomUpdate)
+      window.removeEventListener("globalRoomUpdate", handleGlobalRoomUpdate as EventListener)
     }
-  }, [fetchRooms])
+  }, [fetchRooms, showRealtimeUpdate]) // Remove fetchRooms dependency to prevent unnecessary re-renders
 
   const handleRefresh = useCallback(() => {
     console.log("🔄 Manual refresh triggered")
@@ -296,6 +391,20 @@ export default function Homepage() {
           </Button>
         </div>
       </div>
+
+      {/* Real-time Update Notifications */}
+      {realtimeUpdates.length > 0 && (
+        <div className="fixed top-16 right-4 z-50 space-y-2">
+          {realtimeUpdates.map((update, index) => (
+            <div
+              key={`${update}-${index}`}
+              className="bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-slide-in-right text-sm"
+            >
+              🔄 {update}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div className="bg-orange-500 px-4 py-2">

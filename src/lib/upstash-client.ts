@@ -392,11 +392,22 @@ export class GameStateManager {
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
 
-      // Publish room update event - THIS IS THE KEY CHANGE
+      // Publish room update event with detailed data - IMPROVED VERSION
       await publishEvent({
         type: "room_updated",
         roomId,
-        data: roomData,
+        data: {
+          id: roomData.id,
+          stake: roomData.stake,
+          players: roomData.players,
+          playersCount: roomData.players.length,
+          maxPlayers: roomData.maxPlayers,
+          status: roomData.status,
+          prize: roomData.prize,
+          activeGames: roomData.activeGames,
+          hasBonus: roomData.hasBonus,
+          lastUpdate: new Date().toISOString(),
+        },
         timestamp: new Date().toISOString(),
       })
 
@@ -593,14 +604,23 @@ export class GameStateManager {
             // Also remove their board selection
             await this.removeBoardSelection(room.id, playerId)
 
-            // Publish player left event
+            // Publish player left event with specific data
             await publishEvent({
               type: "player_left",
               roomId: room.id,
               data: {
-                playerId,
-                room: room,
-                playerCount: room.players.length,
+                id: room.id,
+                stake: room.stake,
+                players: room.players,
+                playersCount: room.players.length,
+                maxPlayers: room.maxPlayers,
+                status: room.status,
+                prize: room.prize,
+                activeGames: room.activeGames,
+                hasBonus: room.hasBonus,
+                removedPlayerId: playerId,
+                playerChange: -1,
+                lastUpdate: new Date().toISOString(),
               },
               timestamp: new Date().toISOString(),
               playerId,

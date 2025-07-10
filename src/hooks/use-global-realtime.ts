@@ -36,13 +36,22 @@ export function useGlobalRealtime(playerId: string) {
         const data = JSON.parse(event.data)
         setLastEvent(data)
 
-        // Handle different event types
+        // Handle different event types with more specific data
         switch (data.type) {
           case "room_updated":
           case "player_joined":
           case "player_left":
-            // Dispatch global room update event
-            window.dispatchEvent(new CustomEvent("globalRoomUpdate", { detail: data.data }))
+            // Dispatch global room update event with specific room data
+            window.dispatchEvent(
+              new CustomEvent("globalRoomUpdate", {
+                detail: {
+                  type: data.type,
+                  roomId: data.roomId,
+                  data: data.data,
+                  timestamp: data.timestamp,
+                },
+              }),
+            )
             break
           case "game_update":
             // Game state changed
@@ -60,7 +69,7 @@ export function useGlobalRealtime(playerId: string) {
             // Keep connection alive
             break
           default:
-            console.log("Unknown global event type:", data.type)
+            console.log("Unknown global event type:", data.type, data)
         }
       } catch (error) {
         console.error("Error parsing global SSE message:", error)

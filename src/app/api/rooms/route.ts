@@ -1,6 +1,17 @@
 import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
+import { RedisPubSub } from "@/lib/redis-pubsub"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
+
+// Add this helper function
+async function publishEvent(event: any) {
+  try {
+    await RedisPubSub.publishToRoom(event.roomId, event)
+    await RedisPubSub.publishGlobal(event)
+  } catch (error) {
+    console.error("Error publishing event:", error)
+  }
+}
 
 // Add CORS headers for Telegram Mini App
 const corsHeaders = {
@@ -436,6 +447,28 @@ export async function POST(request: Request) {
 
         await GameStateManager.setRoom(roomId, cleanedRoom)
         await GameStateManager.setPlayerSession(playerId, roomId)
+
+        // Publish specific player joined event - IMPROVED VERSION
+        await publishEvent({
+          type: "player_joined",
+          roomId,
+          data: {
+            id: cleanedRoom.id,
+            stake: cleanedRoom.stake,
+            players: cleanedRoom.players,
+            playersCount: cleanedRoom.players.length,
+            maxPlayers: cleanedRoom.maxPlayers,
+            status: cleanedRoom.status,
+            prize: cleanedRoom.prize,
+            activeGames: cleanedRoom.activeGames,
+            hasBonus: cleanedRoom.hasBonus,
+            newPlayer: player,
+            playerChange: +1,
+            lastUpdate: new Date().toISOString(),
+          },
+          timestamp: new Date().toISOString(),
+          playerId,
+        })
 
         console.log("✅ Player joined room successfully:", playerId, "->", roomId)
 
