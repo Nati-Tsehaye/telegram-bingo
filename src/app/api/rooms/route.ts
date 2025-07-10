@@ -8,27 +8,6 @@ function generateRoomId(): string {
   return `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
 }
 
-// Helper function to generate game ID
-function generateGameId(): string {
-  return `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
-// Helper function to create a new room
-function createRoom(stake: number): GameRoom {
-  const roomId = generateRoomId()
-  return {
-    id: roomId,
-    stake,
-    maxPlayers: 10,
-    players: [],
-    status: "waiting",
-    createdAt: new Date(), // Use Date object instead of string
-    prize: 0,
-    hasBonus: Math.random() > 0.7, // 30% chance of bonus
-    activeGames: 0, // Use number instead of array
-  }
-}
-
 // Helper function to publish room events
 async function publishEvent(event: Omit<GameEvent, "timestamp">) {
   try {
