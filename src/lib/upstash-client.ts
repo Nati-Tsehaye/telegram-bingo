@@ -33,13 +33,18 @@ async function publishEvent(event: GameEvent) {
     // Add to room-specific message queue
     await redis.rpush(`events:${event.roomId}`, JSON.stringify(event))
 
-    // Set TTL on the queue to prevent infinite growth
+    // Also add to global message queue for global updates
+    await redis.rpush(`events:global`, JSON.stringify(event))
+
+    // Set TTL on the queues to prevent infinite growth
     await redis.expire(`events:${event.roomId}`, 3600) // 1 hour
+    await redis.expire(`events:global`, 3600) // 1 hour
 
     // Also send directly to SSE connections if available
     SSEManager.sendToRoom(event.roomId, event)
+    SSEManager.sendToRoom("global", event) // Send to global listeners
 
-    console.log(`📡 Published ${event.type} event for room ${event.roomId}`)
+    console.log(`📡 Published ${event.type} event for room ${event.roomId} (also to global)`)
   } catch (error) {
     console.error(`Error publishing event:`, error)
   }
@@ -387,7 +392,7 @@ export class GameStateManager {
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
 
-      // Publish room update event
+      // Publish room update event - THIS IS THE KEY CHANGE
       await publishEvent({
         type: "room_updated",
         roomId,

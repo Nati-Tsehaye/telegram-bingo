@@ -6,6 +6,7 @@ import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins, User, Zap } from "lucide-react"
 import GameScreen from "@/components/game-screen"
 import { useTelegram } from "@/components/telegram-provider"
+import { useGlobalRealtime } from "@/hooks/use-global-realtime"
 import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
 export default function Homepage() {
@@ -32,6 +33,11 @@ export default function Homepage() {
     console.warn("No user ID or guest ID available, using fallback")
     return `fallback-${Date.now()}`
   }, [user?.id, guestId])
+
+  const playerId = getPlayerId()
+
+  // Connect to global real-time updates
+  const { isConnected } = useGlobalRealtime(playerId)
 
   // Fetch rooms from API with better error handling
   const fetchRooms = useCallback(async () => {
@@ -94,6 +100,20 @@ export default function Homepage() {
       fetchRooms()
     }
   }, [isReady, currentScreen, fetchRooms])
+
+  // Listen for global room updates via SSE
+  useEffect(() => {
+    const handleGlobalRoomUpdate = () => {
+      console.log("🔄 Global room update received, refreshing rooms...")
+      fetchRooms()
+    }
+
+    window.addEventListener("globalRoomUpdate", handleGlobalRoomUpdate)
+
+    return () => {
+      window.removeEventListener("globalRoomUpdate", handleGlobalRoomUpdate)
+    }
+  }, [fetchRooms])
 
   const handleRefresh = useCallback(() => {
     console.log("🔄 Manual refresh triggered")
@@ -261,9 +281,9 @@ export default function Homepage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Badge className="bg-green-500 text-white">
+          <Badge className={`text-white ${isConnected ? "bg-green-500" : "bg-red-500"}`}>
             <Zap className="h-3 w-3 mr-1" />
-            {totalPlayers} Online
+            {totalPlayers} Online {isConnected ? "🟢" : "🔴"}
           </Badge>
           <Button
             onClick={handleRefresh}
@@ -297,7 +317,7 @@ export default function Homepage() {
         </div>
       </div>
 
-      {/* Debug Info - Show in development */}
+      {/* Real-time Connection Status */}
       {process.env.NODE_ENV === "development" && (
         <div className="bg-yellow-500 text-black p-2 text-xs">
           <div>Environment: {process.env.NODE_ENV}</div>
@@ -307,6 +327,7 @@ export default function Homepage() {
           <div>Guest ID: {guestId || "None"}</div>
           <div>Player ID: {getPlayerId()}</div>
           <div>Rooms loaded: {gameRooms.length}</div>
+          <div>SSE Connected: {isConnected ? "✅" : "❌"}</div>
           {error && <div className="text-red-600">Error: {error}</div>}
         </div>
       )}
@@ -428,6 +449,7 @@ export default function Homepage() {
       <div className="text-center py-8 text-white/70 text-sm">
         © Arada Bingo 2024 • {totalPlayers} Players Online
         <div className="text-xs mt-1">Last updated: {lastUpdate.toLocaleTimeString()}</div>
+        <div className="text-xs mt-1">Real-time: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}</div>
         {user && (
           <div className="mt-2 text-xs">
             Welcome, {user.first_name} {user.last_name || ""}
