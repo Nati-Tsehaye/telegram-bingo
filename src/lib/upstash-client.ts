@@ -137,11 +137,15 @@ export class GameStateManager {
       const serializedSelection = JSON.stringify(selection)
       await redis.hset(`boards:${roomId}`, { [playerId]: serializedSelection })
 
-      // Publish board selection update
+      // Publish board selection update with detailed data
       await publishEvent({
         type: "board_selected",
         roomId,
-        data: { playerId, selection },
+        data: {
+          playerId,
+          selection,
+          allSelections: await this.getBoardSelections(roomId), // Include all current selections
+        },
         timestamp: new Date().toISOString(),
         playerId,
       })
@@ -239,11 +243,14 @@ export class GameStateManager {
     try {
       await redis.hdel(`boards:${roomId}`, playerId)
 
-      // Publish board deselection update
+      // Publish board deselection update with updated selections list
       await publishEvent({
         type: "board_deselected",
         roomId,
-        data: { playerId },
+        data: {
+          playerId,
+          allSelections: await this.getBoardSelections(roomId), // Include remaining selections
+        },
         timestamp: new Date().toISOString(),
         playerId,
       })
