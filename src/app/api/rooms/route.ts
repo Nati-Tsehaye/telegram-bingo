@@ -3,7 +3,33 @@ import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 import { RedisPubSub, type GameEvent } from "@/lib/redis-pubsub"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
-// Add this helper function with proper typing
+// Helper function to generate room ID
+function generateRoomId(): string {
+  return `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+// Helper function to generate game ID
+function generateGameId(): string {
+  return `game_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
+}
+
+// Helper function to create a new room
+function createRoom(stake: number): GameRoom {
+  const roomId = generateRoomId()
+  return {
+    id: roomId,
+    stake,
+    maxPlayers: 10,
+    players: [],
+    status: "waiting",
+    createdAt: new Date(), // Use Date object instead of string
+    prize: 0,
+    hasBonus: Math.random() > 0.7, // 30% chance of bonus
+    activeGames: 0, // Use number instead of array
+  }
+}
+
+// Helper function to publish room events
 async function publishEvent(event: Omit<GameEvent, "timestamp">) {
   try {
     await RedisPubSub.publishToRoom(event.roomId, event)
@@ -52,8 +78,8 @@ async function initializeRooms() {
         maxPlayers: 100,
         status: "waiting",
         prize: 0,
-        createdAt: new Date(),
-        activeGames: 0,
+        createdAt: new Date(), // Use Date object
+        activeGames: 0, // Use number instead of array
         hasBonus: true,
       }
 
@@ -140,8 +166,8 @@ export async function GET(request: Request) {
               maxPlayers: 100,
               status: "waiting",
               prize: 0,
-              createdAt: new Date(),
-              activeGames: 0,
+              createdAt: new Date(), // Use Date object
+              activeGames: 0, // Use number instead of array
               hasBonus: true,
             }
             await GameStateManager.setRoom(`room-emergency-${stake}`, fallbackRoom)
@@ -252,7 +278,6 @@ export async function GET(request: Request) {
         success: false,
         error: "Failed to fetch rooms",
         details: error instanceof Error ? error.message : "Unknown error",
-        debug: true,
       },
       {
         status: 500,
@@ -493,6 +518,7 @@ export async function POST(request: Request) {
           if (playerRoom) {
             // Remove player from room
             const originalPlayerCount = playerRoom.players?.length || 0
+            const removedPlayer = playerRoom.players?.find((p: Player) => p.id === playerId)
             playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
             playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
 
@@ -525,7 +551,7 @@ export async function POST(request: Request) {
             await GameStateManager.setRoom(playerRoomId as string, playerRoom)
             console.log("✅ Updated room after player left")
 
-            // Publish player left event
+            // Publish player left event with COMPLETE room data
             await publishEvent({
               type: "player_left",
               roomId: playerRoomId as string,
@@ -539,11 +565,14 @@ export async function POST(request: Request) {
                 prize: playerRoom.prize,
                 activeGames: playerRoom.activeGames,
                 hasBonus: playerRoom.hasBonus,
+                removedPlayer: removedPlayer,
                 playerChange: -1,
                 lastUpdate: new Date().toISOString(),
               },
               playerId,
             })
+
+            console.log(`📡 Published player_left event for room ${playerRoomId} with stake ${playerRoom.stake}`)
           }
         }
 

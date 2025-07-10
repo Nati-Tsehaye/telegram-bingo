@@ -93,6 +93,7 @@ export default function Homepage() {
       setIsLoading(false)
     }
   }, [webApp])
+
   // Add this function to show real-time update notifications
   const showRealtimeUpdate = useCallback((message: string) => {
     setRealtimeUpdates((prev) => {
@@ -119,9 +120,18 @@ export default function Homepage() {
       const eventData = event.detail
       console.log("🔄 Global room update received:", eventData)
 
-      // Show real-time update notification
+      // Show real-time update notification with better error handling
       if (eventData && eventData.type && eventData.data) {
-        const roomStake = eventData.data.stake || "Unknown"
+        // Get room stake from the event data
+        const roomStake = eventData.data.stake || eventData.data.id?.split("-")[1] || "Unknown"
+
+        console.log(`📊 Event data for notification:`, {
+          type: eventData.type,
+          stake: roomStake,
+          playersCount: eventData.data.playersCount,
+          roomId: eventData.roomId,
+        })
+
         switch (eventData.type) {
           case "player_joined":
             showRealtimeUpdate(`Player joined ${roomStake} ETB room`)
@@ -142,31 +152,58 @@ export default function Homepage() {
           case "player_left":
           case "room_updated":
             // Update specific room in the state
-            if (eventData.data && eventData.data.id) {
+            if (eventData.data && (eventData.data.id || eventData.roomId)) {
+              const roomId = eventData.data.id || eventData.roomId
+
               setGameRooms((prevRooms) => {
                 return prevRooms.map((room) => {
-                  if (room.id === eventData.data.id) {
+                  if (room.id === roomId) {
                     // Update the specific room with new data
-                    return {
+                    const updatedRoom = {
                       ...room,
-                      players: eventData.data.players?.length || room.players,
-                      prize: eventData.data.prize || room.prize,
+                      players:
+                        eventData.data.playersCount !== undefined
+                          ? eventData.data.playersCount
+                          : eventData.data.players?.length !== undefined
+                            ? eventData.data.players.length
+                            : room.players,
+                      prize: eventData.data.prize !== undefined ? eventData.data.prize : room.prize,
                       status: eventData.data.status || room.status,
-                      activeGames: eventData.data.activeGames || room.activeGames,
+                      activeGames:
+                        eventData.data.activeGames !== undefined ? eventData.data.activeGames : room.activeGames,
                     }
+
+                    console.log(`✅ Updated room ${roomId} locally:`, {
+                      oldPlayers: room.players,
+                      newPlayers: updatedRoom.players,
+                      oldPrize: room.prize,
+                      newPrize: updatedRoom.prize,
+                    })
+
+                    return updatedRoom
                   }
                   return room
                 })
               })
 
-              // Update total players count
-              setTotalPlayers((prev) => {
+              // Update total players count based on the change
+              if (eventData.data.playerChange !== undefined) {
+                setTotalPlayers((prev) => Math.max(0, prev + eventData.data.playerChange))
+                console.log(`🔢 Total players updated by ${eventData.data.playerChange}`)
+              } else {
+                // Fallback: calculate change based on event type
                 const change = eventData.type === "player_joined" ? 1 : eventData.type === "player_left" ? -1 : 0
-                return Math.max(0, prev + change)
-              })
+                if (change !== 0) {
+                  setTotalPlayers((prev) => Math.max(0, prev + change))
+                  console.log(`🔢 Total players updated by ${change} (fallback)`)
+                }
+              }
 
               setLastUpdate(new Date())
-              console.log(`✅ Updated room ${eventData.data.id} locally without full refresh`)
+              console.log(`✅ Updated room ${roomId} locally without full refresh`)
+            } else {
+              console.warn("⚠️ Event data missing room ID, doing full refresh")
+              fetchRooms()
             }
             break
           default:

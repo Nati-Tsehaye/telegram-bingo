@@ -13,10 +13,10 @@ export interface GameRoom extends Record<string, unknown> {
   maxPlayers: number
   status: "waiting" | "starting" | "active" | "finished"
   prize: number
-  createdAt: Date
-  activeGames?: number
+  createdAt: Date | string // Allow both Date and string
+  activeGames?: number // Change from array to number
   hasBonus: boolean
-  gameStartTime?: Date
+  gameStartTime?: Date | string // Allow both Date and string
   calledNumbers?: number[]
   currentNumber?: number
 }
