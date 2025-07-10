@@ -1,17 +1,6 @@
 import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
-import { RedisPubSub, type GameEvent } from "@/lib/redis-pubsub"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
-
-// Helper function to publish room events
-async function publishEvent(event: Omit<GameEvent, "timestamp">) {
-  try {
-    await RedisPubSub.publishToRoom(event.roomId, event)
-    await RedisPubSub.publishGlobal(event)
-  } catch (error) {
-    console.error("Error publishing event:", error)
-  }
-}
 
 // Add CORS headers for Telegram Mini App
 const corsHeaders = {
@@ -52,8 +41,8 @@ async function initializeRooms() {
         maxPlayers: 100,
         status: "waiting",
         prize: 0,
-        createdAt: new Date(), // Use Date object
-        activeGames: 0, // Use number instead of array
+        createdAt: new Date(),
+        activeGames: 0,
         hasBonus: true,
       }
 
@@ -140,8 +129,8 @@ export async function GET(request: Request) {
               maxPlayers: 100,
               status: "waiting",
               prize: 0,
-              createdAt: new Date(), // Use Date object
-              activeGames: 0, // Use number instead of array
+              createdAt: new Date(),
+              activeGames: 0,
               hasBonus: true,
             }
             await GameStateManager.setRoom(`room-emergency-${stake}`, fallbackRoom)
@@ -252,6 +241,7 @@ export async function GET(request: Request) {
         success: false,
         error: "Failed to fetch rooms",
         details: error instanceof Error ? error.message : "Unknown error",
+        debug: true,
       },
       {
         status: 500,
@@ -447,27 +437,6 @@ export async function POST(request: Request) {
         await GameStateManager.setRoom(roomId, cleanedRoom)
         await GameStateManager.setPlayerSession(playerId, roomId)
 
-        // Publish specific player joined event - IMPROVED VERSION
-        await publishEvent({
-          type: "player_joined",
-          roomId,
-          data: {
-            id: cleanedRoom.id,
-            stake: cleanedRoom.stake,
-            players: cleanedRoom.players,
-            playersCount: cleanedRoom.players.length,
-            maxPlayers: cleanedRoom.maxPlayers,
-            status: cleanedRoom.status,
-            prize: cleanedRoom.prize,
-            activeGames: cleanedRoom.activeGames,
-            hasBonus: cleanedRoom.hasBonus,
-            newPlayer: player,
-            playerChange: +1,
-            lastUpdate: new Date().toISOString(),
-          },
-          playerId,
-        })
-
         console.log("✅ Player joined room successfully:", playerId, "->", roomId)
 
         return NextResponse.json(
@@ -492,7 +461,6 @@ export async function POST(request: Request) {
           if (playerRoom) {
             // Remove player from room
             const originalPlayerCount = playerRoom.players?.length || 0
-            const removedPlayer = playerRoom.players?.find((p: Player) => p.id === playerId)
             playerRoom.players = playerRoom.players?.filter((p: Player) => p.id !== playerId) || []
             playerRoom.prize = (playerRoom.players?.length || 0) * playerRoom.stake
 
@@ -524,29 +492,6 @@ export async function POST(request: Request) {
 
             await GameStateManager.setRoom(playerRoomId as string, playerRoom)
             console.log("✅ Updated room after player left")
-
-            // Publish player left event with COMPLETE room data
-            await publishEvent({
-              type: "player_left",
-              roomId: playerRoomId as string,
-              data: {
-                id: playerRoom.id,
-                stake: playerRoom.stake,
-                players: playerRoom.players,
-                playersCount: playerRoom.players.length,
-                maxPlayers: playerRoom.maxPlayers,
-                status: playerRoom.status,
-                prize: playerRoom.prize,
-                activeGames: playerRoom.activeGames,
-                hasBonus: playerRoom.hasBonus,
-                removedPlayer: removedPlayer,
-                playerChange: -1,
-                lastUpdate: new Date().toISOString(),
-              },
-              playerId,
-            })
-
-            console.log(`📡 Published player_left event for room ${playerRoomId} with stake ${playerRoom.stake}`)
           }
         }
 

@@ -6,7 +6,6 @@ import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins, User, Zap } from "lucide-react"
 import GameScreen from "@/components/game-screen"
 import { useTelegram } from "@/components/telegram-provider"
-import { useGlobalRealtime } from "@/hooks/use-global-realtime"
 import type { GameRoom, GameRoomSummary, RoomResponse } from "@/types/game"
 
 export default function Homepage() {
@@ -20,7 +19,6 @@ export default function Homepage() {
   const [totalPlayers, setTotalPlayers] = useState(0)
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date())
   const [error, setError] = useState<string | null>(null)
-  const [realtimeUpdates, setRealtimeUpdates] = useState<string[]>([])
 
   // Get consistent player ID - use Telegram user ID or persistent guest ID
   const getPlayerId = useCallback(() => {
@@ -34,11 +32,6 @@ export default function Homepage() {
     console.warn("No user ID or guest ID available, using fallback")
     return `fallback-${Date.now()}`
   }, [user?.id, guestId])
-
-  const playerId = getPlayerId()
-
-  // Connect to global real-time updates
-  const { isConnected } = useGlobalRealtime(playerId)
 
   // Fetch rooms from API with better error handling
   const fetchRooms = useCallback(async () => {
@@ -94,18 +87,6 @@ export default function Homepage() {
     }
   }, [webApp])
 
-  // Add this function to show real-time update notifications
-  const showRealtimeUpdate = useCallback((message: string) => {
-    setRealtimeUpdates((prev) => {
-      const newUpdates = [message, ...prev.slice(0, 2)] // Keep only last 3 updates
-      // Auto-remove after 3 seconds
-      setTimeout(() => {
-        setRealtimeUpdates((current) => current.filter((update) => update !== message))
-      }, 3000)
-      return newUpdates
-    })
-  }, [])
-
   // Load rooms when component mounts and when returning to lobby
   useEffect(() => {
     if (isReady && currentScreen === "lobby") {
@@ -113,113 +94,6 @@ export default function Homepage() {
       fetchRooms()
     }
   }, [isReady, currentScreen, fetchRooms])
-
-  // Listen for global room updates via SSE - IMPROVED VERSION
-  useEffect(() => {
-    const handleGlobalRoomUpdate = (event: CustomEvent) => {
-      const eventData = event.detail
-      console.log("🔄 Global room update received:", eventData)
-
-      // Show real-time update notification with better error handling
-      if (eventData && eventData.type && eventData.data) {
-        // Get room stake from the event data
-        const roomStake = eventData.data.stake || eventData.data.id?.split("-")[1] || "Unknown"
-
-        console.log(`📊 Event data for notification:`, {
-          type: eventData.type,
-          stake: roomStake,
-          playersCount: eventData.data.playersCount,
-          roomId: eventData.roomId,
-        })
-
-        switch (eventData.type) {
-          case "player_joined":
-            showRealtimeUpdate(`Player joined ${roomStake} ETB room`)
-            break
-          case "player_left":
-            showRealtimeUpdate(`Player left ${roomStake} ETB room`)
-            break
-          case "room_updated":
-            showRealtimeUpdate(`Room ${roomStake} ETB updated`)
-            break
-        }
-      }
-
-      // Instead of full refresh, update specific room data
-      if (eventData && eventData.type) {
-        switch (eventData.type) {
-          case "player_joined":
-          case "player_left":
-          case "room_updated":
-            // Update specific room in the state
-            if (eventData.data && (eventData.data.id || eventData.roomId)) {
-              const roomId = eventData.data.id || eventData.roomId
-
-              setGameRooms((prevRooms) => {
-                return prevRooms.map((room) => {
-                  if (room.id === roomId) {
-                    // Update the specific room with new data
-                    const updatedRoom = {
-                      ...room,
-                      players:
-                        eventData.data.playersCount !== undefined
-                          ? eventData.data.playersCount
-                          : eventData.data.players?.length !== undefined
-                            ? eventData.data.players.length
-                            : room.players,
-                      prize: eventData.data.prize !== undefined ? eventData.data.prize : room.prize,
-                      status: eventData.data.status || room.status,
-                      activeGames:
-                        eventData.data.activeGames !== undefined ? eventData.data.activeGames : room.activeGames,
-                    }
-
-                    console.log(`✅ Updated room ${roomId} locally:`, {
-                      oldPlayers: room.players,
-                      newPlayers: updatedRoom.players,
-                      oldPrize: room.prize,
-                      newPrize: updatedRoom.prize,
-                    })
-
-                    return updatedRoom
-                  }
-                  return room
-                })
-              })
-
-              // Update total players count based on the change
-              if (eventData.data.playerChange !== undefined) {
-                setTotalPlayers((prev) => Math.max(0, prev + eventData.data.playerChange))
-                console.log(`🔢 Total players updated by ${eventData.data.playerChange}`)
-              } else {
-                // Fallback: calculate change based on event type
-                const change = eventData.type === "player_joined" ? 1 : eventData.type === "player_left" ? -1 : 0
-                if (change !== 0) {
-                  setTotalPlayers((prev) => Math.max(0, prev + change))
-                  console.log(`🔢 Total players updated by ${change} (fallback)`)
-                }
-              }
-
-              setLastUpdate(new Date())
-              console.log(`✅ Updated room ${roomId} locally without full refresh`)
-            } else {
-              console.warn("⚠️ Event data missing room ID, doing full refresh")
-              fetchRooms()
-            }
-            break
-          default:
-            // For other events, do a targeted refresh
-            console.log("🔄 Unknown event type, doing targeted refresh")
-            fetchRooms()
-        }
-      }
-    }
-
-    window.addEventListener("globalRoomUpdate", handleGlobalRoomUpdate as EventListener)
-
-    return () => {
-      window.removeEventListener("globalRoomUpdate", handleGlobalRoomUpdate as EventListener)
-    }
-  }, [fetchRooms, showRealtimeUpdate])
 
   const handleRefresh = useCallback(() => {
     console.log("🔄 Manual refresh triggered")
@@ -387,9 +261,9 @@ export default function Homepage() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          <Badge className={`text-white ${isConnected ? "bg-green-500" : "bg-red-500"}`}>
+          <Badge className="bg-green-500 text-white">
             <Zap className="h-3 w-3 mr-1" />
-            {totalPlayers} Online {isConnected ? "🟢" : "🔴"}
+            {totalPlayers} Online
           </Badge>
           <Button
             onClick={handleRefresh}
@@ -402,20 +276,6 @@ export default function Homepage() {
           </Button>
         </div>
       </div>
-
-      {/* Real-time Update Notifications */}
-      {realtimeUpdates.length > 0 && (
-        <div className="fixed top-16 right-4 z-50 space-y-2">
-          {realtimeUpdates.map((update, index) => (
-            <div
-              key={`${update}-${index}`}
-              className="bg-green-500 text-white px-4 py-2 rounded-lg shadow-lg animate-slide-in-right text-sm"
-            >
-              🔄 {update}
-            </div>
-          ))}
-        </div>
-      )}
 
       {/* Navigation Tabs */}
       <div className="bg-orange-500 px-4 py-2">
@@ -437,7 +297,7 @@ export default function Homepage() {
         </div>
       </div>
 
-      {/* Real-time Connection Status */}
+      {/* Debug Info - Show in development */}
       {process.env.NODE_ENV === "development" && (
         <div className="bg-yellow-500 text-black p-2 text-xs">
           <div>Environment: {process.env.NODE_ENV}</div>
@@ -447,7 +307,6 @@ export default function Homepage() {
           <div>Guest ID: {guestId || "None"}</div>
           <div>Player ID: {getPlayerId()}</div>
           <div>Rooms loaded: {gameRooms.length}</div>
-          <div>SSE Connected: {isConnected ? "✅" : "❌"}</div>
           {error && <div className="text-red-600">Error: {error}</div>}
         </div>
       )}
@@ -569,7 +428,6 @@ export default function Homepage() {
       <div className="text-center py-8 text-white/70 text-sm">
         © Arada Bingo 2024 • {totalPlayers} Players Online
         <div className="text-xs mt-1">Last updated: {lastUpdate.toLocaleTimeString()}</div>
-        <div className="text-xs mt-1">Real-time: {isConnected ? "🟢 Connected" : "🔴 Disconnected"}</div>
         {user && (
           <div className="mt-2 text-xs">
             Welcome, {user.first_name} {user.last_name || ""}

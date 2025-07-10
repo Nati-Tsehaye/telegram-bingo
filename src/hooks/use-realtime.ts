@@ -41,28 +41,13 @@ export function useRealtime(roomId: string, playerId: string) {
             // Game state changed
             window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data }))
             break
-          case "board_selected":
-            // Board selection changed - dispatch with complete data
-            window.dispatchEvent(
-              new CustomEvent("boardSelectionUpdate", {
-                detail: {
-                  playerId: data.data.playerId,
-                  selection: data.data.selection,
-                  allSelections: data.data.allSelections,
-                },
-              }),
-            )
+          case "board_selection":
+            // Board selection changed
+            window.dispatchEvent(new CustomEvent("boardSelectionUpdate", { detail: data.data }))
             break
-          case "board_deselected":
-            // Board deselection - dispatch with complete data
-            window.dispatchEvent(
-              new CustomEvent("boardDeselectionUpdate", {
-                detail: {
-                  playerId: data.data.playerId,
-                  allSelections: data.data.allSelections,
-                },
-              }),
-            )
+          case "board_deselection":
+            // Board deselection
+            window.dispatchEvent(new CustomEvent("boardDeselectionUpdate", { detail: data.data }))
             break
           case "heartbeat":
             // Keep connection alive

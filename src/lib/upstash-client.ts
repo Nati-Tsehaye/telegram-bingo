@@ -1,6 +1,4 @@
 import { Redis } from "@upstash/redis"
-import type { GameEvent } from "@/lib/redis-pubsub"
-import { SSEManager } from "@/lib/sse-manager"
 import type { GameRoom } from "@/types/game"
 
 // Initialize Redis client with better error handling and logging
@@ -27,45 +25,23 @@ export const redis = new Redis({
   token: redisToken,
 })
 
-// Enhanced helper function to publish events via Redis message queue
-async function publishEvent(event: GameEvent) {
-  try {
-    // Add to room-specific message queue
-    await redis.rpush(`events:${event.roomId}`, JSON.stringify(event))
-
-    // Also add to global message queue for global updates
-    await redis.rpush(`events:global`, JSON.stringify(event))
-
-    // Set TTL on the queues to prevent infinite growth
-    await redis.expire(`events:${event.roomId}`, 3600) // 1 hour
-    await redis.expire(`events:global`, 3600) // 1 hour
-
-    // Also send directly to SSE connections if available
-    SSEManager.sendToRoom(event.roomId, event)
-    SSEManager.sendToRoom("global", event) // Send to global listeners
-
-    console.log(`📡 Published ${event.type} event for room ${event.roomId} (also to global)`)
-  } catch (error) {
-    console.error(`Error publishing event:`, error)
-  }
-}
-
-// Game state management with Redis and real-time updates
+// Game state management with Redis
 export class GameStateManager {
-  // Store game state in Redis with TTL and publish update
+  // Store game state in Redis with TTL
   static async setGameState(roomId: string, state: unknown) {
     try {
       console.log(`💾 Setting game state for room ${roomId}:`, state)
       await redis.setex(`game:${roomId}`, 3600, JSON.stringify(state)) // 1 hour TTL
 
-      // Publish game state update
-      await publishEvent({
-        type: "room_updated",
-        roomId,
-        data: state,
-        timestamp: new Date().toISOString(),
-      })
-
+      // Publish update to subscribers
+      await redis.publish(
+        `room:${roomId}`,
+        JSON.stringify({
+          type: "game_update",
+          data: state,
+          timestamp: new Date().toISOString(),
+        }),
+      )
       console.log(`✅ Game state set and published for room ${roomId}`)
     } catch (error) {
       console.error(`Error setting game state for room ${roomId}:`, error)
@@ -106,7 +82,7 @@ export class GameStateManager {
     }
   }
 
-  // NEW: Reset game state for a room with real-time update
+  // NEW: Reset game state for a room
   static async resetGameState(roomId: string) {
     try {
       console.log(`🔄 Resetting game state for room ${roomId}`)
@@ -130,25 +106,22 @@ export class GameStateManager {
     }
   }
 
-  // Board selections management with real-time updates
+  // Board selections management - Enhanced with cleanup
   static async setBoardSelection(roomId: string, playerId: string, selection: unknown) {
     try {
       // Ensure selection is properly serialized
       const serializedSelection = JSON.stringify(selection)
       await redis.hset(`boards:${roomId}`, { [playerId]: serializedSelection })
 
-      // Publish board selection update with detailed data
-      await publishEvent({
-        type: "board_selected",
-        roomId,
-        data: {
-          playerId,
-          selection,
-          allSelections: await this.getBoardSelections(roomId), // Include all current selections
-        },
-        timestamp: new Date().toISOString(),
-        playerId,
-      })
+      // Publish board selection update
+      await redis.publish(
+        `room:${roomId}`,
+        JSON.stringify({
+          type: "board_selection",
+          data: { playerId, selection },
+          timestamp: new Date().toISOString(),
+        }),
+      )
     } catch (error) {
       console.error(`Error setting board selection for room ${roomId}, player ${playerId}:`, error)
       throw new Error(`Failed to set board selection: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -243,17 +216,15 @@ export class GameStateManager {
     try {
       await redis.hdel(`boards:${roomId}`, playerId)
 
-      // Publish board deselection update with updated selections list
-      await publishEvent({
-        type: "board_deselected",
-        roomId,
-        data: {
-          playerId,
-          allSelections: await this.getBoardSelections(roomId), // Include remaining selections
-        },
-        timestamp: new Date().toISOString(),
-        playerId,
-      })
+      // Publish removal update
+      await redis.publish(
+        `room:${roomId}`,
+        JSON.stringify({
+          type: "board_deselection",
+          data: { playerId },
+          timestamp: new Date().toISOString(),
+        }),
+      )
     } catch (error) {
       console.error(`Error removing board selection for room ${roomId}, player ${playerId}:`, error)
       throw new Error(`Failed to remove board selection: ${error instanceof Error ? error.message : "Unknown error"}`)
@@ -279,13 +250,14 @@ export class GameStateManager {
             console.log(`🗑️ Removed board selection for player ${playerId} from room ${roomId}`)
 
             // Publish removal update
-            await publishEvent({
-              type: "board_deselected",
-              roomId,
-              data: { playerId },
-              timestamp: new Date().toISOString(),
-              playerId,
-            })
+            await redis.publish(
+              `room:${roomId}`,
+              JSON.stringify({
+                type: "board_deselection",
+                data: { playerId },
+                timestamp: new Date().toISOString(),
+              }),
+            )
           }
         } catch (error) {
           console.error(`Error removing board selection from ${key}:`, error)
@@ -334,7 +306,7 @@ export class GameStateManager {
     }
   }
 
-  // Room management with real-time updates
+  // Room management - Now properly typed to accept GameRoom with better error handling
   static async setRoom(roomId: string, room: GameRoom) {
     try {
       console.log(`🏠 Setting room ${roomId}...`)
@@ -398,25 +370,6 @@ export class GameStateManager {
 
       await redis.setex(`room:${roomId}`, 7200, serializedRoom) // 2 hours TTL
       console.log(`✅ Successfully set room ${roomId}`)
-
-      // Publish room update event with detailed data - IMPROVED VERSION
-      await publishEvent({
-        type: "room_updated",
-        roomId,
-        data: {
-          id: roomData.id,
-          stake: roomData.stake,
-          players: roomData.players,
-          playersCount: roomData.players.length,
-          maxPlayers: roomData.maxPlayers,
-          status: roomData.status,
-          prize: roomData.prize,
-          activeGames: roomData.activeGames,
-          hasBonus: roomData.hasBonus,
-          lastUpdate: new Date().toISOString(),
-        },
-        timestamp: new Date().toISOString(),
-      })
 
       // Clean up board selections after room update
       await this.cleanupBoardSelections(roomId)
@@ -565,7 +518,7 @@ export class GameStateManager {
     }
   }
 
-  // Enhanced method to remove player from all rooms and clean up board selections with real-time updates
+  // Enhanced method to remove player from all rooms and clean up board selections
   static async removePlayerFromAllRooms(playerId: string) {
     try {
       console.log(`🧹 Removing player ${playerId} from all rooms...`)
@@ -576,11 +529,9 @@ export class GameStateManager {
       for (const room of rooms) {
         if (Array.isArray(room.players)) {
           const originalPlayerCount = room.players.length
-          const playerWasInRoom = room.players.some((p) => p.id === playerId)
-
           room.players = room.players.filter((player) => player.id !== playerId)
 
-          if (room.players.length !== originalPlayerCount && playerWasInRoom) {
+          if (room.players.length !== originalPlayerCount) {
             // Player was in this room, update it
             room.prize = room.players.length * room.stake
 
@@ -596,11 +547,11 @@ export class GameStateManager {
               await this.resetGameState(room.id)
             } else if (room.players.length < 2 && room.status !== "waiting") {
               // If we go below minimum players and game was active, reset
+              room.status = "waiting"
               room.activeGames = 0
               room.calledNumbers = []
               room.currentNumber = undefined
               room.gameStartTime = undefined
-              room.status = "waiting"
 
               // Reset game state
               await this.resetGameState(room.id)
@@ -610,28 +561,6 @@ export class GameStateManager {
 
             // Also remove their board selection
             await this.removeBoardSelection(room.id, playerId)
-
-            // Publish player left event with specific data
-            await publishEvent({
-              type: "player_left",
-              roomId: room.id,
-              data: {
-                id: room.id,
-                stake: room.stake,
-                players: room.players,
-                playersCount: room.players.length,
-                maxPlayers: room.maxPlayers,
-                status: room.status,
-                prize: room.prize,
-                activeGames: room.activeGames,
-                hasBonus: room.hasBonus,
-                removedPlayerId: playerId,
-                playerChange: -1,
-                lastUpdate: new Date().toISOString(),
-              },
-              timestamp: new Date().toISOString(),
-              playerId,
-            })
 
             removedFromRooms++
             console.log(`🏠 Removed player from room ${room.id} (${originalPlayerCount} -> ${room.players.length})`)
@@ -698,21 +627,6 @@ export class GameStateManager {
 
             await this.setRoom(room.id, room)
             removedFromRooms++
-
-            // Publish player left events for each removed player
-            for (const removedPlayer of playersToRemove) {
-              await publishEvent({
-                type: "player_left",
-                roomId: room.id,
-                data: {
-                  playerId: removedPlayer.id,
-                  room: room,
-                  playerCount: room.players.length,
-                },
-                timestamp: new Date().toISOString(),
-                playerId: removedPlayer.id,
-              })
-            }
 
             console.log(
               `🏠 Removed ${playersToRemove.length} duplicate players from room ${room.id} (${originalPlayerCount} -> ${room.players.length})`,
@@ -917,7 +831,7 @@ export class GameStateManager {
         ghostPlayersRemoved: totalGhostPlayersRemoved,
         sessionsRemoved: cleanedSessions,
         boardSelectionsRemoved: cleanedBoardSelections,
-        duplicateTelegramUsers: duplicateTelegramUsers,
+        duplicateTelegramUsers: duplicateTelegramUsers, // Add this line
       }
     } catch (error) {
       console.error("Error during aggressive ghost cleanup:", error)
@@ -930,7 +844,7 @@ export class GameStateManager {
     }
   }
 
-  // Game number calling with auto-increment and real-time updates
+  // Game number calling with auto-increment - FIXED VERSION
   static async callNextNumber(roomId: string) {
     try {
       console.log(`🎲 Calling next number for room: ${roomId}`)
@@ -975,15 +889,6 @@ export class GameStateManager {
         gameState.gameStatus = "finished"
         gameState.lastUpdate = new Date().toISOString()
         await this.setGameState(roomId, gameState)
-
-        // Publish game finished event
-        await publishEvent({
-          type: "game_finished",
-          roomId,
-          data: gameState,
-          timestamp: new Date().toISOString(),
-        })
-
         return null
       }
 
@@ -1000,18 +905,6 @@ export class GameStateManager {
 
       console.log(`💾 Updating game state for room ${roomId} with new number ${newNumber}`)
       await this.setGameState(roomId, gameState)
-
-      // Publish number called event
-      await publishEvent({
-        type: "number_called",
-        roomId,
-        data: {
-          number: newNumber,
-          calledNumbers: gameState.calledNumbers,
-          gameState: gameState,
-        },
-        timestamp: new Date().toISOString(),
-      })
 
       console.log(`✅ Successfully called number ${newNumber} for room ${roomId}`)
       console.log(`📊 Total called: ${gameState.calledNumbers.length}/75`)
@@ -1150,26 +1043,8 @@ export class GameStateManager {
         }
       }
 
-      // Clean up old event queues
-      const eventKeys = await redis.keys("events:*")
-      let cleanedEvents = 0
-      for (const key of eventKeys) {
-        try {
-          const ttl = await redis.ttl(key)
-          if (ttl <= 0) {
-            await redis.del(key)
-            cleanedEvents++
-          }
-        } catch {
-          try {
-            await redis.del(key)
-            cleanedEvents++
-          } catch {}
-        }
-      }
-
       console.log(
-        `✅ Cleanup completed: ${cleanedGames} games, ${cleanedRooms} rooms, ${cleanedBoards} board collections, ${cleanedSessions} player sessions, ${cleanedEvents} event queues`,
+        `✅ Cleanup completed: ${cleanedGames} games, ${cleanedRooms} rooms, ${cleanedBoards} board collections, ${cleanedSessions} player sessions`,
       )
     } catch (error) {
       console.error("Error during cleanup:", error)

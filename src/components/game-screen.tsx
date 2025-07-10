@@ -84,26 +84,12 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   useEffect(() => {
     const handleBoardSelectionUpdate = (event: CustomEvent) => {
       console.log("Board selection update:", event.detail)
-
-      // Update with the complete selections list from the event
-      if (event.detail.allSelections) {
-        setBoardSelections(event.detail.allSelections)
-      } else {
-        // Fallback to fetching if allSelections not provided
-        fetchBoardSelections()
-      }
+      fetchBoardSelections() // Refresh selections
     }
 
     const handleBoardDeselectionUpdate = (event: CustomEvent) => {
       console.log("Board deselection update:", event.detail)
-
-      // Update with the complete selections list from the event
-      if (event.detail.allSelections) {
-        setBoardSelections(event.detail.allSelections)
-      } else {
-        // Fallback to fetching if allSelections not provided
-        fetchBoardSelections()
-      }
+      fetchBoardSelections() // Refresh selections
     }
 
     window.addEventListener("boardSelectionUpdate", handleBoardSelectionUpdate as EventListener)
@@ -305,8 +291,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
       isMySelection,
       isTakenByOther,
       takenBy: selection?.playerName,
-      isAvailable: !selection, // Add the full selection object
-      selection,
+      isAvailable: !selection,
     }
   }
 
@@ -347,7 +332,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
                     status.isMySelection
                       ? "bg-green-500 shadow-lg transform scale-105 ring-2 ring-green-300"
                       : status.isTakenByOther
-                        ? "bg-red-500 cursor-not-allowed opacity-90 ring-2 ring-red-300"
+                        ? "bg-red-500 cursor-not-allowed opacity-75 ring-2 ring-red-300"
                         : "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30"
                   }
                   ${isLoading ? "opacity-50 cursor-wait" : ""}
@@ -368,33 +353,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
           })}
         </div>
       </div>
-
-      {/* Board Selection Status */}
-      {boardSelections.length > 0 && (
-        <div className="max-w-2xl mx-auto mb-6">
-          <div className="bg-white/10 backdrop-blur-sm rounded-lg p-4">
-            <div className="text-center text-white font-medium mb-3">Board Selections</div>
-            <div className="space-y-2">
-              {boardSelections.map((selection) => (
-                <div
-                  key={selection.playerId}
-                  className={`flex items-center justify-between p-2 rounded ${
-                    selection.playerId === playerId
-                      ? "bg-green-500/20 border border-green-500/50"
-                      : "bg-red-500/20 border border-red-500/50"
-                  }`}
-                >
-                  <span className="text-white text-sm font-medium">
-                    {selection.playerName}
-                    {selection.playerId === playerId && " (You)"}
-                  </span>
-                  <span className="text-white font-bold">Board #{selection.boardNumber}</span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Selected Board Preview */}
       {selectedBoard && (
