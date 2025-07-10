@@ -3,11 +3,6 @@ import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
 import { RedisPubSub, type GameEvent } from "@/lib/redis-pubsub"
 import type { GameRoom, Player, JoinRoomRequest, GameRoomSummary } from "@/types/game"
 
-// Helper function to generate room ID
-function generateRoomId(): string {
-  return `room_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`
-}
-
 // Helper function to publish room events
 async function publishEvent(event: Omit<GameEvent, "timestamp">) {
   try {
