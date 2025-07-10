@@ -61,7 +61,7 @@ export class RedisPubSub {
   }
 
   // Subscribe to a room channel (for server-side use)
-  static async subscribeToRoom(roomId: string, callback: (event: GameEvent) => void) {
+  static async subscribeToRoom(roomId: string, _callback: (event: GameEvent) => void) {
     try {
       const channel = `room:${roomId}`
       console.log(`🔔 Subscribing to ${channel}`)

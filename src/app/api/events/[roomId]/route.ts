@@ -72,7 +72,7 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       request.signal.addEventListener("abort", cleanup)
 
       // Store cleanup function for manual cleanup
-      ;(controller as any)._cleanup = cleanup
+      ;(controller as ReadableStreamDefaultController & { _cleanup?: () => void })._cleanup = cleanup
     },
   })
 
