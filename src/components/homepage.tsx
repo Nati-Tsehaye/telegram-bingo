@@ -14,7 +14,7 @@ export default function Homepage() {
   const [selectedRoom, setSelectedRoom] = useState<GameRoomClient | null>(null) // Use GameRoomClient
 
   // WebSocket connection
-  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001"
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "wss://web-service-8dz5.onrender.com"
   const { isConnected, rooms, error } = useWebSocket(WS_URL) // Removed joinRoom
 
   // Fallback rooms for when WebSocket is not connected
