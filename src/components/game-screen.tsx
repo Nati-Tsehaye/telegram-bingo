@@ -26,7 +26,7 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
     joinRoom,
     startGame,
     selectBoard: sendSelectBoard,
-  } = useWebSocket(process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001")
+  } = useWebSocket(process.env.NEXT_PUBLIC_WS_URL || "wss://web-service-8dz5.onrender.com")
 
   // Find the current room from the WebSocket state
   const currentRoom = rooms.find((r) => r.id === initialRoom.id) || initialRoom
@@ -173,7 +173,11 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
                 key={number}
                 onClick={() => handleNumberClick(number)}
                 disabled={isSelectedByOtherPlayer || !isPlayerRegisteredOnServer} // Disable if taken by other or not registered
-                className={`aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm ${buttonClass} transition-all duration-300`}
+                className={`
+                  aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
+                  ${buttonClass}
+                  transition-all duration-300
+                `}
               >
                 {number}
               </button>
@@ -192,7 +196,10 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
                 return (
                   <div
                     key={`${rowIndex}-${colIndex}`}
-                    className={`w-8 h-6 flex items-center justify-center rounded text-white font-medium text-xs ${isFree ? "bg-green-500" : "bg-white/30 backdrop-blur-sm border border-white/40"}`}
+                    className={`
+                      w-8 h-6 flex items-center justify-center rounded text-white font-medium text-xs
+                      ${isFree ? "bg-green-500" : "bg-white/30 backdrop-blur-sm border border-white/40"}
+                    `}
                   >
                     {isFree ? "F" : number}
                   </div>
