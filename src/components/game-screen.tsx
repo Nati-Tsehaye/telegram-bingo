@@ -97,6 +97,12 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
     sendSelectBoard(currentRoom.id, number)
   }
 
+  // Handle both touch and click events for mobile compatibility
+  const handleNumberTouch = (number: number) => {
+    // Prevent default touch behavior that might interfere
+    handleNumberClick(number)
+  }
+
   const handleStartGame = () => {
     if (!selectedBoard) {
       alert("Please select a board number before starting the game!")
@@ -148,9 +154,9 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
         </div>
       </div>
 
-      {/* Numbers Grid */}
+      {/* Numbers Grid - Enhanced for mobile touch */}
       <div className="max-w-2xl mx-auto mb-6">
-        <div className="grid grid-cols-10 gap-2">
+        <div className="grid grid-cols-10 gap-1 md:gap-2">
           {numbers.map((number) => {
             // Determine if this specific button number is selected by the current player (locally or server-confirmed)
             const isSelectedByMe = selectedBoardNumber === number
@@ -159,27 +165,53 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
             const serverSelectedBoardEntry = currentRoom.selectedBoards.find((b) => b.boardId === number)
             const isSelectedByOtherPlayer = !!serverSelectedBoardEntry && serverSelectedBoardEntry.playerId !== playerId
 
-            let buttonClass = "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30" // Default available
+            let buttonClass = "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30 active:bg-white/40" // Default available
 
             if (isSelectedByOtherPlayer) {
               buttonClass = "bg-red-500 opacity-70 cursor-not-allowed" // Red for others' selection
             } else if (isSelectedByMe) {
               // If it's not taken by another, and it's my local selection, it's green
-              buttonClass = "bg-green-500 shadow-lg transform scale-105" // Green for my selection
+              buttonClass = "bg-green-500 shadow-lg transform scale-105 active:scale-100" // Green for my selection
             }
 
             return (
               <button
                 key={number}
                 onClick={() => handleNumberClick(number)}
+                onTouchStart={(e) => {
+                  // Add haptic feedback for mobile if available
+                  if (navigator.vibrate) {
+                    navigator.vibrate(50)
+                  }
+                  // Prevent long press context menu
+                  e.preventDefault()
+                }}
+                onTouchEnd={(e) => {
+                  e.preventDefault()
+                  // Small delay to ensure touch is registered
+                  setTimeout(() => handleNumberTouch(number), 10)
+                }}
                 disabled={isSelectedByOtherPlayer || !isPlayerRegisteredOnServer} // Disable if taken by other or not registered
                 className={`
-                aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
-                ${buttonClass}
-                transition-all duration-300
-              `}
+                  relative aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
+                  min-h-[44px] min-w-[44px] touch-manipulation
+                  ${buttonClass}
+                  transition-all duration-200 ease-in-out
+                  select-none user-select-none
+                  focus:outline-none focus:ring-2 focus:ring-white/50
+                  disabled:pointer-events-none
+                `}
+                style={{
+                  WebkitTapHighlightColor: "transparent",
+                  WebkitTouchCallout: "none",
+                  WebkitUserSelect: "none",
+                  userSelect: "none",
+                  touchAction: "manipulation",
+                }}
               >
                 {number}
+                {/* Visual feedback overlay for touch */}
+                <div className="absolute inset-0 rounded-lg opacity-0 bg-white/20 pointer-events-none transition-opacity duration-150 active:opacity-100" />
               </button>
             )
           })}
@@ -210,11 +242,12 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
         </div>
       )}
 
-      {/* Action Buttons */}
+      {/* Action Buttons - Enhanced for mobile */}
       <div className="flex justify-center gap-6 mb-8">
         <Button
           onClick={handleRefresh}
-          className="bg-blue-500 hover:bg-blue-600 text-white font-bold px-8 py-4 rounded-full text-lg shadow-lg"
+          className="bg-blue-500 hover:bg-blue-600 active:bg-blue-700 text-white font-bold px-8 py-4 rounded-full text-lg shadow-lg min-h-[48px] touch-manipulation"
+          style={{ WebkitTapHighlightColor: "transparent" }}
         >
           <RefreshCw className="h-5 w-5 mr-2" />
           Refresh
@@ -222,7 +255,8 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
         <Button
           onClick={handleStartGame}
           disabled={gameStatus === "active" || !selectedBoard || !isPlayerRegisteredOnServer} // Disable if not registered
-          className="bg-orange-500 hover:bg-orange-600 disabled:bg-gray-400 text-white font-bold px-8 py-4 rounded-full text-lg shadow-lg"
+          className="bg-orange-500 hover:bg-orange-600 active:bg-orange-700 disabled:bg-gray-400 text-white font-bold px-8 py-4 rounded-full text-lg shadow-lg min-h-[48px] touch-manipulation"
+          style={{ WebkitTapHighlightColor: "transparent" }}
         >
           {gameStatus === "active" ? "Game Active" : "Start Game"}
         </Button>
@@ -231,11 +265,14 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
       {/* Footer */}
       <div className="text-center text-white/80 text-sm">© Arada Bingo 2024</div>
 
-      {/* Back button */}
+      {/* Back button - Enhanced for mobile */}
       <button
         onClick={onBack}
-        className="fixed top-4 left-4 text-white/60 hover:text-white"
-        style={{ fontSize: "24px" }}
+        className="fixed top-4 left-4 text-white/60 hover:text-white min-h-[44px] min-w-[44px] flex items-center justify-center touch-manipulation"
+        style={{
+          fontSize: "24px",
+          WebkitTapHighlightColor: "transparent",
+        }}
       >
         ←
       </button>
