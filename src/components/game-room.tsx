@@ -17,8 +17,6 @@ export default function GameRoom({ roomId, stake, onBack }: GameRoomProps) {
   const [gameStarted, setGameStarted] = useState(false)
   const [currentNumber, setCurrentNumber] = useState<number | null>(null)
   const [calledNumbers, setCalledNumbers] = useState<number[]>([])
-  const [timeLeft, setTimeLeft] = useState(30)
-
   const startGame = () => {
     setGameStarted(true)
     // Simulate number calling
@@ -71,7 +69,7 @@ export default function GameRoom({ roomId, stake, onBack }: GameRoomProps) {
 
               <div className="flex items-center justify-center gap-2 mb-6">
                 <Clock className="h-5 w-5 text-blue-300" />
-                <span className="text-blue-200">Starting in {timeLeft}s</span>
+                <span className="text-blue-200">Starting in 30s</span>
               </div>
 
               <Button onClick={startGame} className="bg-orange-500 hover:bg-orange-600 text-white font-bold px-8 py-3">

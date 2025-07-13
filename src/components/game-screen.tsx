@@ -22,7 +22,6 @@ interface GameScreenProps {
 }
 
 export default function GameScreen({ room, onBack }: GameScreenProps) {
-  const [calledNumbers, setCalledNumbers] = useState<number[]>([]) // Remove all red numbers
   const [selectedBoardNumber, setSelectedBoardNumber] = useState<number | null>(null) // Green number from image
   const [selectedBoard, setSelectedBoard] = useState<BingoBoard | null>(null)
   const [gameStatus, setGameStatus] = useState<"waiting" | "active" | "starting">("waiting")
@@ -47,7 +46,8 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     // Select new board number
     setSelectedBoardNumber(number)
     const board = getBoardById(number)
-    setSelectedBoard(board)
+    // Explicitly handle the undefined case
+    setSelectedBoard(board || null)
   }
 
   const handleStartGame = () => {
@@ -109,14 +109,14 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
                 key={number}
                 onClick={() => handleNumberClick(number)}
                 className={`
-                  aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
-                  ${
-                    isSelected
-                      ? "bg-green-500 shadow-lg transform scale-105"
-                      : "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30"
-                  }
-                  transition-all duration-300
-                `}
+                aspect-square flex items-center justify-center rounded-lg text-white font-bold text-sm
+                ${
+                  isSelected
+                    ? "bg-green-500 shadow-lg transform scale-105"
+                    : "bg-white/20 backdrop-blur-sm border border-white/30 hover:bg-white/30"
+                }
+                transition-all duration-300
+              `}
               >
                 {number}
               </button>
@@ -136,9 +136,9 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
                   <div
                     key={`${rowIndex}-${colIndex}`}
                     className={`
-                      w-8 h-6 flex items-center justify-center rounded text-white font-medium text-xs
-                      ${isFree ? "bg-green-500" : "bg-white/30 backdrop-blur-sm border border-white/40"}
-                    `}
+                    w-8 h-6 flex items-center justify-center rounded text-white font-medium text-xs
+                    ${isFree ? "bg-green-500" : "bg-white/30 backdrop-blur-sm border border-white/40"}
+                  `}
                   >
                     {isFree ? "F" : number}
                   </div>

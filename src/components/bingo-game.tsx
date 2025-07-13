@@ -24,8 +24,8 @@ interface BingoGameProps {
 
 export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProps) {
   const [isMuted, setIsMuted] = useState(false)
-  const [currentCall, setCurrentCall] = useState("G-52")
-  const [recentCalls, setRecentCalls] = useState(["G-52", "I-25", "N-42", "G-57"])
+  // const [currentCall, setCurrentCall] = useState("G-52")
+  // const [recentCalls, setRecentCalls] = useState(["G-52", "I-25", "N-42", "G-57"])
   // const [calledNumbers, setCalledNumbers] = useState<number[]>([16, 25, 42, 52])
   const [markedCells, setMarkedCells] = useState<boolean[][]>([
     [false, false, false, false, false],
@@ -143,17 +143,17 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
           <div className="text-center">
             <div className="text-white text-sm mb-1">Current Call</div>
             <div className="bg-orange-500 text-white text-2xl font-bold rounded-full w-16 h-16 flex items-center justify-center mx-auto">
-              {currentCall}
+              {/* {currentCall} */}
             </div>
           </div>
 
           {/* Recent Calls */}
           <div className="flex gap-1 justify-center">
-            {recentCalls.map((call, index) => (
-              <div key={index} className="bg-amber-700 text-white px-2 py-1 rounded-full text-xs font-medium">
-                {call}
-              </div>
-            ))}
+            {/* {recentCalls.map((call, index) => (
+            <div key={index} className="bg-amber-700 text-white px-2 py-1 rounded-full text-xs font-medium">
+              {call}
+            </div>
+          ))} */}
           </div>
 
           {/* BINGO Letters */}
@@ -180,11 +180,11 @@ export default function BingoGame({ room, selectedBoard, onBack }: BingoGameProp
                       key={`${rowIndex}-${colIndex}`}
                       onClick={() => toggleCellMark(rowIndex, colIndex)}
                       className={`
-                        w-8 h-8 flex items-center justify-center text-xs font-bold rounded
-                        ${isMarked && !isFree ? "bg-green-500 text-white" : "bg-amber-700 text-white"}
-                        ${isFree ? "bg-green-500 text-white" : ""}
-                        hover:opacity-80 transition-opacity
-                      `}
+                      w-8 h-8 flex items-center justify-center text-xs font-bold rounded
+                      ${isMarked && !isFree ? "bg-green-500 text-white" : "bg-amber-700 text-white"}
+                      ${isFree ? "bg-green-500 text-white" : ""}
+                      hover:opacity-80 transition-opacity
+                    `}
                     >
                       {isFree ? "★" : number}
                     </button>
