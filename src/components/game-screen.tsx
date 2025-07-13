@@ -51,9 +51,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
   // Generate numbers 1-100 in a 10x10 grid
   const numbers = Array.from({ length: 100 }, (_, i) => i + 1)
 
-  // 🚀 CONNECT TO REAL-TIME UPDATES
-  const { isConnected } = useRealtime(room.id, playerId)
-
   // Fetch current board selections
   const fetchBoardSelections = useCallback(async () => {
     try {
@@ -81,42 +78,30 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
     }
   }, [room.id, webApp])
 
-  // 🚀 LISTEN FOR REAL-TIME BOARD SELECTION UPDATES
+  const { isConnected: _isConnected } = useRealtime(room.id, playerId)
+
+  // Add event listeners for real-time updates
   useEffect(() => {
     const handleBoardSelectionUpdate = (event: CustomEvent) => {
-      console.log("🎯 Real-time board selection update:", event.detail)
+      console.log("Board selection update:", event.detail)
+      fetchBoardSelections() // Refresh selections
+    }
 
-      const { action, selection, allSelections, playerId: updatedPlayerId } = event.detail
-
-      // Update the board selections state with real-time data
-      setBoardSelections(allSelections || [])
-
-      // Show feedback to user
-      if (action === "select" && selection) {
-        if (updatedPlayerId === playerId) {
-          // This player made the selection
-          webApp?.HapticFeedback.impactOccurred("medium")
-        } else {
-          // Another player made the selection
-          webApp?.HapticFeedback.impactOccurred("light")
-          webApp?.showAlert(`${selection.playerName} selected board ${selection.boardNumber}`)
-        }
-      } else if (action === "deselect") {
-        if (updatedPlayerId === playerId) {
-          // This player deselected
-          webApp?.HapticFeedback.impactOccurred("light")
-        }
-      }
+    const handleBoardDeselectionUpdate = (event: CustomEvent) => {
+      console.log("Board deselection update:", event.detail)
+      fetchBoardSelections() // Refresh selections
     }
 
     window.addEventListener("boardSelectionUpdate", handleBoardSelectionUpdate as EventListener)
+    window.addEventListener("boardDeselectionUpdate", handleBoardDeselectionUpdate as EventListener)
 
     return () => {
       window.removeEventListener("boardSelectionUpdate", handleBoardSelectionUpdate as EventListener)
+      window.removeEventListener("boardDeselectionUpdate", handleBoardDeselectionUpdate as EventListener)
     }
-  }, [playerId, webApp])
+  }, [fetchBoardSelections])
 
-  // Initial fetch of board selections
+  // Remove the polling interval and replace with initial fetch only
   useEffect(() => {
     fetchBoardSelections()
   }, [fetchBoardSelections])
@@ -174,7 +159,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
         if (data.success) {
           setSelectedBoardNumber(null)
           setSelectedBoard(null)
-          // Real-time update will handle the UI update
+          await fetchBoardSelections()
           webApp?.HapticFeedback.impactOccurred("light")
         } else {
           console.error("Deselect failed:", data)
@@ -228,7 +213,7 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
         setSelectedBoardNumber(number)
         const board = getBoardById(number)
         setSelectedBoard(board || null)
-        // Real-time update will handle the UI update
+        await fetchBoardSelections()
 
         // Haptic feedback for successful selection
         webApp?.HapticFeedback.impactOccurred("medium")
@@ -317,17 +302,6 @@ export default function GameScreen({ room, onBack }: GameScreenProps) {
 
   return (
     <div className="min-h-screen bg-gradient-to-b from-purple-400 via-purple-500 to-purple-600 p-4">
-      {/* Connection Status */}
-      <div className="flex justify-center mb-4">
-        <div
-          className={`px-3 py-1 rounded-full text-xs font-medium ${
-            isConnected ? "bg-green-500 text-white" : "bg-red-500 text-white animate-pulse"
-          }`}
-        >
-          {isConnected ? "🟢 Live Updates Active" : "🔴 Connecting..."}
-        </div>
-      </div>
-
       {/* Status Pills */}
       <div className="flex justify-center gap-4 mb-6">
         <div className="bg-white rounded-full px-6 py-3 shadow-lg">

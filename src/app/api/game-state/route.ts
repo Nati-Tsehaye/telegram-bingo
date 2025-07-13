@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
-import { RealtimeManager } from "@/lib/realtime-manager"
 import type { GameStateRequest, Winner } from "@/types/game"
 
 // Centralized number calling - only one instance per room
@@ -34,12 +33,6 @@ function startCentralizedNumberCalling(roomId: string) {
         gameState.gameStatus = "finished"
         await GameStateManager.setGameState(roomId, gameState)
 
-        // 🚀 BROADCAST GAME FINISHED TO ALL PLAYERS
-        RealtimeManager.broadcast(roomId, {
-          type: "game_finished",
-          data: gameState,
-        })
-
         // Stop calling
         if (activeCallers.has(roomId)) {
           clearInterval(activeCallers.get(roomId)!)
@@ -52,19 +45,6 @@ function startCentralizedNumberCalling(roomId: string) {
       const newNumber = await GameStateManager.callNextNumber(roomId)
       if (newNumber) {
         console.log(`📢 Centrally called number ${newNumber} for room ${roomId}`)
-
-        // Get updated game state
-        const updatedGameState = await GameStateManager.getGameState(roomId)
-
-        // 🚀 BROADCAST NEW NUMBER TO ALL PLAYERS IN REAL-TIME
-        RealtimeManager.broadcast(roomId, {
-          type: "number_called",
-          data: {
-            newNumber,
-            gameState: updatedGameState,
-            timestamp: new Date().toISOString(),
-          },
-        })
       }
     } catch (error) {
       console.error(`Error in centralized number calling for room ${roomId}:`, error)
@@ -162,12 +142,6 @@ export async function POST(request: Request) {
 
           await GameStateManager.setGameState(roomId, gameState)
 
-          // 🚀 BROADCAST GAME START TO ALL PLAYERS
-          RealtimeManager.broadcast(roomId, {
-            type: "game_started",
-            data: gameState,
-          })
-
           // Start centralized number calling for this room
           startCentralizedNumberCalling(roomId)
 
@@ -181,16 +155,6 @@ export async function POST(request: Request) {
         const newNumber = await GameStateManager.callNextNumber(roomId)
         if (newNumber) {
           gameState = await GameStateManager.getGameState(roomId) // Get updated state
-
-          // 🚀 BROADCAST NEW NUMBER TO ALL PLAYERS
-          RealtimeManager.broadcast(roomId, {
-            type: "number_called",
-            data: {
-              newNumber,
-              gameState,
-              timestamp: new Date().toISOString(),
-            },
-          })
         }
         break
 
@@ -207,26 +171,10 @@ export async function POST(request: Request) {
 
           if (gameState.winners.length === 1) {
             gameState.gameStatus = "finished"
-
-            // Stop number calling
-            if (activeCallers.has(roomId)) {
-              clearInterval(activeCallers.get(roomId)!)
-              activeCallers.delete(roomId)
-            }
           }
 
           gameState.lastUpdate = new Date().toISOString()
           await GameStateManager.setGameState(roomId, gameState)
-
-          // 🚀 BROADCAST BINGO WIN TO ALL PLAYERS
-          RealtimeManager.broadcast(roomId, {
-            type: "bingo_claimed",
-            data: {
-              winner,
-              gameState,
-              timestamp: new Date().toISOString(),
-            },
-          })
         }
         break
 
@@ -246,12 +194,6 @@ export async function POST(request: Request) {
           lastUpdate: new Date().toISOString(),
         }
         await GameStateManager.setGameState(roomId, gameState)
-
-        // 🚀 BROADCAST GAME RESET TO ALL PLAYERS
-        RealtimeManager.broadcast(roomId, {
-          type: "game_reset",
-          data: gameState,
-        })
         break
     }
 
