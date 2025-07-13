@@ -3,86 +3,76 @@
 import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { RefreshCw, Users, Coins } from "lucide-react"
+import { RefreshCw, Users, Coins, Wifi, WifiOff } from "lucide-react"
 import GameScreen from "@/components/game-screen"
-
-interface GameRoom {
-  id: number
-  stake: number
-  players: number
-  prize: number
-  status: "waiting" | "active"
-  activeGames?: number
-  hasBonus: boolean
-}
+import { useWebSocket } from "@/hooks/use-websocket"
+import type { GameRoomClient } from "@/hooks/use-websocket" // Import client-side GameRoom type
 
 export default function Homepage() {
   const [activeTab, setActiveTab] = useState("Stake")
-  const [gameRooms, setGameRooms] = useState<GameRoom[]>([
+  const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
+  const [selectedRoom, setSelectedRoom] = useState<GameRoomClient | null>(null) // Use GameRoomClient
+
+  // WebSocket connection
+  const WS_URL = process.env.NEXT_PUBLIC_WS_URL || "ws://localhost:3001"
+  const { isConnected, rooms, error } = useWebSocket(WS_URL) // Removed joinRoom
+
+  // Fallback rooms for when WebSocket is not connected
+  const [fallbackRooms] = useState<GameRoomClient[]>([
+    // Use GameRoomClient
     {
       id: 1,
       stake: 10,
-      players: 3,
-      prize: 30,
+      players: 0,
+      prize: 0,
       status: "waiting",
       hasBonus: true,
+      selectedBoards: [], // Add selectedBoards for fallback
     },
     {
       id: 2,
       stake: 20,
-      players: 4,
-      prize: 80,
+      players: 0,
+      prize: 0,
       status: "waiting",
       hasBonus: true,
+      selectedBoards: [], // Add selectedBoards for fallback
     },
     {
       id: 3,
       stake: 50,
-      players: 28,
-      prize: 1120,
-      status: "active",
-      activeGames: 1,
+      players: 0,
+      prize: 0,
+      status: "waiting",
+      activeGames: 0,
       hasBonus: true,
+      selectedBoards: [], // Add selectedBoards for fallback
     },
     {
       id: 4,
       stake: 100,
-      players: 6,
-      prize: 480,
-      status: "active",
-      activeGames: 1,
+      players: 0,
+      prize: 0,
+      status: "waiting",
+      activeGames: 0,
       hasBonus: true,
+      selectedBoards: [], // Add selectedBoards for fallback
     },
   ])
 
-  const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
-  const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
-
-  //   // Initialize Telegram Web App
-  //   useEffect(() => {
-  //     if (typeof window !== "undefined" && window.Telegram?.WebApp) {
-  //       const tg = window.Telegram.WebApp
-  //       tg.ready()
-  //       tg.expand()
-
-  //       // Set theme colors to match the blue design
-  //       document.documentElement.style.setProperty("--tg-theme-bg-color", "#1e40af")
-  //       document.documentElement.style.setProperty("--tg-theme-text-color", "#ffffff")
-  //     }
-  //   }, [])
+  // Use WebSocket rooms if connected, otherwise use fallback
+  const gameRooms = isConnected && rooms.length > 0 ? rooms : fallbackRooms
 
   const handleRefresh = () => {
-    // Simulate refreshing room data
-    setGameRooms((prev) =>
-      prev.map((room) => ({
-        ...room,
-        players: Math.floor(Math.random() * 30) + 1,
-        prize: room.stake * (Math.floor(Math.random() * 20) + 5),
-      })),
-    )
+    // Force reconnection if not connected
+    if (!isConnected) {
+      window.location.reload()
+    }
   }
 
-  const handlePlay = (room: GameRoom) => {
+  const handlePlay = (room: GameRoomClient) => {
+    // Use GameRoomClient
+    // Navigate to game screen without joining the room yet
     setSelectedRoom(room)
     setCurrentScreen("game")
   }
@@ -101,6 +91,20 @@ export default function Homepage() {
           <div className="bg-black px-3 py-1 rounded">
             <span className="text-yellow-400 font-bold text-lg">📺 SETB</span>
           </div>
+          {/* Connection Status */}
+          <div className="flex items-center gap-2">
+            {isConnected ? (
+              <div className="flex items-center gap-1 text-green-400 text-sm">
+                <Wifi className="h-4 w-4" />
+                <span>Live</span>
+              </div>
+            ) : (
+              <div className="flex items-center gap-1 text-red-400 text-sm">
+                <WifiOff className="h-4 w-4" />
+                <span>Offline</span>
+              </div>
+            )}
+          </div>
         </div>
         <Button
           onClick={handleRefresh}
@@ -111,6 +115,13 @@ export default function Homepage() {
           Refresh
         </Button>
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="bg-red-500/20 border border-red-500/50 text-red-200 p-3 mx-4 rounded-lg">
+          <p className="text-sm">⚠️ {error}</p>
+        </div>
+      )}
 
       {/* Navigation Tabs */}
       <div className="bg-orange-500 px-4 py-2">
@@ -171,7 +182,7 @@ export default function Homepage() {
               <div className="text-center">
                 <div className="text-2xl font-bold text-white flex items-center gap-1">
                   <Users className="h-5 w-5" />
-                  {room.players}
+                  <span className={isConnected ? "text-green-300" : "text-gray-300"}>{room.players}</span>
                 </div>
               </div>
 
@@ -198,7 +209,10 @@ export default function Homepage() {
       </div>
 
       {/* Footer */}
-      <div className="text-center py-8 text-white/70 text-sm">© Arada Bingo 2024</div>
+      <div className="text-center py-8 text-white/70 text-sm">
+        © Arada Bingo 2024
+        {isConnected && <div className="text-xs text-green-400 mt-1">🟢 Connected to live server</div>}
+      </div>
     </div>
   )
 }
