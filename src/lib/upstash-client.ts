@@ -745,7 +745,6 @@ export class GameStateManager {
           sessions.sort((a, b) => b.joinedAt.getTime() - a.joinedAt.getTime())
 
           // Keep the most recent session and one backup, remove the rest
-          const sessionsToKeep = sessions.slice(0, 2)
           const sessionsToRemove = sessions.slice(2)
 
           console.log(`🔒 Keeping 2 most recent sessions, removing ${sessionsToRemove.length} old ones`)
