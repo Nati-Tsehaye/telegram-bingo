@@ -110,6 +110,7 @@ export default function Homepage() {
     try {
       const playerId = getPlayerId()
       console.log("🎮 Joining room with player ID:", playerId)
+      console.log("🏠 Room current players:", room.players)
 
       // Use absolute URL for Telegram Mini App
       const baseUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
@@ -135,8 +136,10 @@ export default function Homepage() {
       })
 
       const data = await response.json()
+      console.log("🎮 Join room response:", data)
 
       if (data.success) {
+        console.log("✅ Successfully joined room, players:", data.room.players?.length || 0)
         setSelectedRoom(data.room)
         setCurrentScreen("game")
 
@@ -147,6 +150,7 @@ export default function Homepage() {
           await handleLeaveRoom(playerId)
         })
       } else {
+        console.error("❌ Failed to join room:", data.error)
         webApp?.showAlert(data.error || "Failed to join room")
       }
     } catch (error) {

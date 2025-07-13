@@ -535,7 +535,7 @@ export class GameStateManager {
             // Player was in this room, update it
             room.prize = room.players.length * room.stake
 
-            // Reset room if empty or insufficient players
+            // Only reset room if completely empty
             if (room.players.length === 0) {
               room.status = "waiting"
               room.activeGames = 0
@@ -545,17 +545,8 @@ export class GameStateManager {
 
               // Reset game state
               await this.resetGameState(room.id)
-            } else if (room.players.length < 2 && room.status !== "waiting") {
-              // If we go below minimum players and game was active, reset
-              room.status = "waiting"
-              room.activeGames = 0
-              room.calledNumbers = []
-              room.currentNumber = undefined
-              room.gameStartTime = undefined
-
-              // Reset game state
-              await this.resetGameState(room.id)
             }
+            // Remove the condition that resets when < 2 players
 
             await this.setRoom(room.id, room)
 
@@ -649,6 +640,153 @@ export class GameStateManager {
     } catch (error) {
       console.error(`Error removing Telegram user ${telegramId} duplicates:`, error)
       return { removedFromRooms: 0, removedPlayerIds: [] }
+    }
+  }
+
+  // GENTLE GHOST PLAYER CLEANUP - Only remove truly inactive players
+  static async gentleGhostCleanup(activePlayerIds: Set<string> = new Set()) {
+    try {
+      console.log(`🧹 Starting gentle ghost player cleanup...`)
+      console.log(`🔒 Protected player IDs:`, Array.from(activePlayerIds))
+
+      const rooms = await this.getAllRooms()
+      let totalGhostPlayersRemoved = 0
+      const now = new Date()
+      const thirtyMinutesAgo = new Date(now.getTime() - 30 * 60 * 1000) // 30 minutes threshold
+
+      for (const room of rooms) {
+        if (Array.isArray(room.players) && room.players.length > 0) {
+          const originalPlayerCount = room.players.length
+
+          // Only remove players that are:
+          // 1. Guest players (not Telegram users)
+          // 2. Not in the protected list
+          // 3. Joined more than 30 minutes ago (truly inactive)
+          room.players = room.players.filter((player) => {
+            const isProtected = activePlayerIds.has(player.id)
+            const isGuestPlayer = player.id.startsWith("guest-")
+            const isTelegramUser = !isGuestPlayer
+
+            // Always keep Telegram users and protected players
+            if (isTelegramUser || isProtected) {
+              return true
+            }
+
+            // For guest players, check if they're truly inactive (30+ minutes old)
+            if (isGuestPlayer && player.joinedAt) {
+              const joinedAt = player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt)
+              const isOldSession = joinedAt < thirtyMinutesAgo
+
+              if (isOldSession) {
+                console.log(
+                  `👻 Removing old ghost guest player ${player.id} from room ${room.id} (joined: ${joinedAt.toISOString()})`,
+                )
+                return false
+              }
+            }
+
+            return true
+          })
+
+          // Update prize based on current player count
+          room.prize = room.players.length * room.stake
+
+          // Only reset room status if completely empty
+          if (room.players.length === 0 && room.status !== "waiting") {
+            room.status = "waiting"
+            room.activeGames = 0
+            room.calledNumbers = []
+            room.currentNumber = undefined
+            room.gameStartTime = undefined
+
+            // Reset game state
+            await this.resetGameState(room.id)
+            console.log(`🔄 Reset room ${room.id} to waiting state (no active players)`)
+          }
+
+          const ghostPlayersRemoved = originalPlayerCount - room.players.length
+          if (ghostPlayersRemoved > 0) {
+            totalGhostPlayersRemoved += ghostPlayersRemoved
+            await this.setRoom(room.id, room)
+            console.log(`🧹 Removed ${ghostPlayersRemoved} old ghost players from room ${room.id}`)
+          }
+        }
+      }
+
+      // Handle duplicate Telegram users more carefully
+      let duplicateTelegramUsers = 0
+      const telegramUserSessions = new Map<number, Array<{ playerId: string; joinedAt: Date; roomId: string }>>()
+
+      // Collect all Telegram user sessions across all rooms
+      for (const room of rooms) {
+        if (Array.isArray(room.players)) {
+          room.players.forEach((player) => {
+            if (player.telegramId && typeof player.telegramId === "number") {
+              if (!telegramUserSessions.has(player.telegramId)) {
+                telegramUserSessions.set(player.telegramId, [])
+              }
+              telegramUserSessions.get(player.telegramId)!.push({
+                playerId: player.id,
+                joinedAt: player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt),
+                roomId: room.id,
+              })
+            }
+          })
+        }
+      }
+
+      // Only remove duplicate Telegram sessions if there are more than 2 for the same user
+      for (const [telegramId, sessions] of telegramUserSessions.entries()) {
+        if (sessions.length > 2) {
+          // Only clean up if more than 2 sessions
+          console.log(`🔍 Found ${sessions.length} sessions for Telegram user ${telegramId}`)
+
+          // Sort by joinedAt (most recent first)
+          sessions.sort((a, b) => b.joinedAt.getTime() - a.joinedAt.getTime())
+
+          // Keep the most recent session and one backup, remove the rest
+          const sessionsToKeep = sessions.slice(0, 2)
+          const sessionsToRemove = sessions.slice(2)
+
+          console.log(`🔒 Keeping 2 most recent sessions, removing ${sessionsToRemove.length} old ones`)
+
+          // Remove old duplicate sessions
+          for (const session of sessionsToRemove) {
+            const room = await this.getRoom(session.roomId)
+            if (room && Array.isArray(room.players)) {
+              const originalCount = room.players.length
+              room.players = room.players.filter((p) => p.id !== session.playerId)
+
+              if (room.players.length !== originalCount) {
+                duplicateTelegramUsers++
+                room.prize = room.players.length * room.stake
+                await this.setRoom(room.id, room)
+
+                // Clean up session and board selections
+                await this.removePlayerSession(session.playerId)
+                await this.removePlayerFromAllBoardSelections(session.playerId)
+
+                console.log(`🧹 Removed old duplicate session ${session.playerId} from room ${session.roomId}`)
+              }
+            }
+          }
+        }
+      }
+
+      console.log(`🧹 Gentle cleanup completed:`)
+      console.log(`   - ${totalGhostPlayersRemoved} old ghost players removed`)
+      console.log(`   - ${duplicateTelegramUsers} old duplicate Telegram sessions removed`)
+
+      return {
+        ghostPlayersRemoved: totalGhostPlayersRemoved,
+        duplicateTelegramUsers: duplicateTelegramUsers,
+      }
+    } catch (error) {
+      console.error("Error during gentle ghost cleanup:", error)
+      return {
+        ghostPlayersRemoved: 0,
+        duplicateTelegramUsers: 0,
+      }
     }
   }
 

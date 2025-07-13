@@ -153,15 +153,15 @@ export async function GET(request: Request) {
     // Collect all current active player IDs from all rooms (for aggressive cleanup)
     const currentActivePlayerIds = new Set<string>()
     const now = new Date()
-    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000) // Only 5 minutes for very recent activity
+    const tenMinutesAgo = new Date(now.getTime() - 10 * 60 * 1000) // Increased to 10 minutes for more stability
 
     validRooms.forEach((room) => {
       if (Array.isArray(room.players)) {
         room.players.forEach((player) => {
           if (player && player.id && player.joinedAt) {
             const joinedAt = player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt)
-            // Only consider very recent players as "active"
-            if (joinedAt > fiveMinutesAgo) {
+            // Only consider players from last 10 minutes as "active"
+            if (joinedAt > tenMinutesAgo) {
               currentActivePlayerIds.add(player.id)
             }
           }
@@ -169,14 +169,11 @@ export async function GET(request: Request) {
       }
     })
 
-    console.log("🔍 Current active player IDs (last 5 min):", Array.from(currentActivePlayerIds))
+    console.log("🔍 Current active player IDs (last 10 min):", Array.from(currentActivePlayerIds))
 
-    // Run aggressive ghost cleanup - remove ALL guest players except current active ones
-    const cleanupResult = await GameStateManager.aggressiveGhostCleanup(currentActivePlayerIds)
-    console.log("🔥 Aggressive cleanup result:", cleanupResult)
-    if (cleanupResult.duplicateTelegramUsers > 0) {
-      console.log(`🔄 Removed ${cleanupResult.duplicateTelegramUsers} duplicate Telegram user sessions`)
-    }
+    // Run GENTLE cleanup instead of aggressive - only remove truly inactive players
+    const cleanupResult = await GameStateManager.gentleGhostCleanup(currentActivePlayerIds)
+    console.log("🧹 Gentle cleanup result:", cleanupResult)
 
     // Fetch rooms again after cleanup
     const cleanedRooms = await GameStateManager.getAllRooms()
@@ -184,9 +181,10 @@ export async function GET(request: Request) {
       (room) => room && typeof room === "object" && room.id && typeof room.stake === "number",
     )
 
-    // Generate room summaries with only active players
+    // Generate room summaries with active players (use longer time window for stability)
+    const fiveMinutesAgo = new Date(now.getTime() - 5 * 60 * 1000) // 5 minutes for display
     const roomSummaries: GameRoomSummary[] = cleanedValidRooms.map((room) => {
-      // Count only very recent players (last 5 minutes)
+      // Count players who joined in the last 5 minutes
       let activePlayers = 0
       if (Array.isArray(room.players)) {
         activePlayers = room.players.filter((player) => {
@@ -216,10 +214,28 @@ export async function GET(request: Request) {
     // Sort rooms by stake for consistent ordering
     roomSummaries.sort((a, b) => a.stake - b.stake)
 
-    // Calculate total unique ACTIVE players across all rooms (very recent only)
-    const totalActivePlayers = currentActivePlayerIds.size
+    // Calculate total unique ACTIVE players across all rooms (last 5 minutes)
+    const totalActivePlayers = new Set()
+    cleanedValidRooms.forEach((room) => {
+      if (Array.isArray(room.players)) {
+        room.players.forEach((player) => {
+          if (player && player.id && player.joinedAt) {
+            const joinedAt = player.joinedAt instanceof Date ? player.joinedAt : new Date(player.joinedAt)
+            if (joinedAt > fiveMinutesAgo) {
+              totalActivePlayers.add(player.id)
+            }
+          }
+        })
+      }
+    })
 
-    console.log("✅ Returning response with", roomSummaries.length, "rooms and", totalActivePlayers, "active players")
+    console.log(
+      "✅ Returning response with",
+      roomSummaries.length,
+      "rooms and",
+      totalActivePlayers.size,
+      "active players",
+    )
     console.log("🏠 Room stakes:", roomSummaries.map((r) => r.stake).join(", "))
     console.log("🔍 Final active player IDs:", Array.from(currentActivePlayerIds))
 
@@ -227,7 +243,7 @@ export async function GET(request: Request) {
       {
         success: true,
         rooms: roomSummaries,
-        totalPlayers: totalActivePlayers,
+        totalPlayers: totalActivePlayers.size,
         timestamp: new Date().toISOString(),
       },
       {
@@ -304,9 +320,9 @@ export async function POST(request: Request) {
           )
         }
 
-        // Run aggressive cleanup before joining - protect only the current player
+        // Run gentle cleanup before joining - protect only the current player
         const protectedPlayerIds = new Set([playerId])
-        await GameStateManager.aggressiveGhostCleanup(protectedPlayerIds)
+        await GameStateManager.gentleGhostCleanup(protectedPlayerIds)
 
         // Fetch room again after cleanup
         const cleanedRoom = await GameStateManager.getRoom(roomId)
@@ -466,7 +482,7 @@ export async function POST(request: Request) {
 
             console.log(`🔢 Player count: ${originalPlayerCount} -> ${playerRoom.players.length}`)
 
-            // Reset room if empty or if it was the last player
+            // Only reset room if completely empty
             if (playerRoom.players.length === 0) {
               console.log("🔄 Resetting room to waiting state (empty)")
               playerRoom.status = "waiting"
@@ -477,18 +493,8 @@ export async function POST(request: Request) {
 
               // Also reset the game state in Redis
               await GameStateManager.resetGameState(playerRoomId as string)
-            } else if (originalPlayerCount > 0 && playerRoom.players.length < 2) {
-              // If we go below minimum players, reset the game
-              console.log("🔄 Resetting room due to insufficient players")
-              playerRoom.status = "waiting"
-              playerRoom.activeGames = 0
-              playerRoom.calledNumbers = []
-              playerRoom.currentNumber = undefined
-              playerRoom.gameStartTime = undefined
-
-              // Also reset the game state in Redis
-              await GameStateManager.resetGameState(playerRoomId as string)
             }
+            // Remove the condition that resets when < 2 players to prevent unnecessary resets
 
             await GameStateManager.setRoom(playerRoomId as string, playerRoom)
             console.log("✅ Updated room after player left")
