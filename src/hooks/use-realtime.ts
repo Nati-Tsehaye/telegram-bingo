@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 
 interface RealtimeEvent {
   type: string
-  data?: any
+  data?: unknown
   timestamp?: string
 }
 
@@ -34,7 +34,7 @@ export function useRealtime(roomId: string, playerId: string) {
 
     eventSource.onmessage = (event) => {
       try {
-        const data = JSON.parse(event.data)
+        const data = JSON.parse(event.data) as RealtimeEvent
         console.log(`📡 SSE message received:`, data)
         setLastEvent(data)
 
@@ -46,8 +46,10 @@ export function useRealtime(roomId: string, playerId: string) {
             break
 
           case "number_called":
-            console.log(`🎲 Number called:`, data.data.newNumber)
-            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data.gameState }))
+            console.log(`🎲 Number called:`, (data.data as { newNumber?: number })?.newNumber)
+            window.dispatchEvent(
+              new CustomEvent("gameStateUpdate", { detail: (data.data as { gameState?: unknown })?.gameState }),
+            )
             break
 
           case "game_started":
@@ -61,8 +63,10 @@ export function useRealtime(roomId: string, playerId: string) {
             break
 
           case "bingo_claimed":
-            console.log(`🎉 BINGO claimed by:`, data.data.winner.playerName)
-            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data.gameState }))
+            console.log(`🎉 BINGO claimed by:`, (data.data as { winner?: { playerName?: string } })?.winner?.playerName)
+            window.dispatchEvent(
+              new CustomEvent("gameStateUpdate", { detail: (data.data as { gameState?: unknown })?.gameState }),
+            )
             break
 
           case "game_reset":
@@ -71,7 +75,7 @@ export function useRealtime(roomId: string, playerId: string) {
             break
 
           case "connected":
-            console.log(`🔌 Connected to room ${data.roomId}`)
+            console.log(`🔌 Connected to room ${(data as { roomId?: string }).roomId}`)
             break
 
           case "heartbeat":
@@ -86,8 +90,8 @@ export function useRealtime(roomId: string, playerId: string) {
       }
     }
 
-    eventSource.onerror = (error) => {
-      console.error(`📡 SSE error for room ${roomId}:`, error)
+    eventSource.onerror = (_error) => {
+      console.error(`📡 SSE error for room ${roomId}`)
       setIsConnected(false)
 
       // Implement exponential backoff for reconnection

@@ -27,12 +27,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       controller.enqueue(new TextEncoder().encode(initialMessage))
 
       let isActive = true
-      let heartbeatInterval: NodeJS.Timeout
+      let heartbeatInterval: NodeJS.Timeout | null = null
 
       // Send periodic heartbeat to keep connection alive
       heartbeatInterval = setInterval(() => {
         if (!isActive) {
-          clearInterval(heartbeatInterval)
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+          }
           return
         }
 
@@ -42,9 +44,11 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
             timestamp: Date.now(),
           })}\n\n`
           controller.enqueue(new TextEncoder().encode(heartbeatMessage))
-        } catch (error) {
+        } catch (_error) {
           console.log(`💔 Heartbeat failed for room ${roomId}, player ${playerId}`)
-          clearInterval(heartbeatInterval)
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+          }
           isActive = false
         }
       }, 30000) // Every 30 seconds
@@ -55,19 +59,21 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
           if (isActive) {
             try {
               controller.enqueue(new TextEncoder().encode(data))
-            } catch (error) {
-              console.log(`📡 Failed to write to stream: ${error}`)
+            } catch (_error) {
+              console.log(`📡 Failed to write to stream for room ${roomId}, player ${playerId}`)
               isActive = false
             }
           }
         },
         close: () => {
           isActive = false
-          clearInterval(heartbeatInterval)
+          if (heartbeatInterval) {
+            clearInterval(heartbeatInterval)
+          }
           try {
             controller.close()
-          } catch (error) {
-            console.log(`Error closing controller: ${error}`)
+          } catch (_error) {
+            console.log(`Error closing controller for room ${roomId}`)
           }
         },
         isActive: () => isActive,
@@ -79,12 +85,14 @@ export async function GET(request: NextRequest, { params }: { params: Promise<{ 
       request.signal.addEventListener("abort", () => {
         console.log(`🔌 SSE connection closed for room ${roomId}, player ${playerId}`)
         isActive = false
-        clearInterval(heartbeatInterval)
+        if (heartbeatInterval) {
+          clearInterval(heartbeatInterval)
+        }
         RealtimeManager.removeConnection(roomId, mockResponse)
         try {
           controller.close()
-        } catch (error) {
-          console.log(`Error closing stream: ${error}`)
+        } catch (_error) {
+          console.log(`Error closing stream for room ${roomId}`)
         }
       })
     },

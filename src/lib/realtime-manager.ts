@@ -33,7 +33,7 @@ export class RealtimeManager {
   }
 
   // Broadcast an event to all connections in a room
-  static broadcast(roomId: string, event: { type: string; data: any }) {
+  static broadcast(roomId: string, event: { type: string; data: unknown }) {
     const roomConnections = this.connections.get(roomId)
     if (!roomConnections || roomConnections.size === 0) {
       console.log(`📡 No connections to broadcast to in room ${roomId}`)
@@ -50,7 +50,7 @@ export class RealtimeManager {
         } else {
           deadConnections.push(connection)
         }
-      } catch (error) {
+      } catch (_error) {
         console.log(`📡 Dead connection detected in room ${roomId}`)
         deadConnections.push(connection)
       }
@@ -78,8 +78,8 @@ export class RealtimeManager {
       roomConnections.forEach((connection) => {
         try {
           connection.close()
-        } catch (error) {
-          console.log(`Error closing connection: ${error}`)
+        } catch (_error) {
+          console.log(`Error closing connection in room ${roomId}`)
         }
       })
       this.connections.delete(roomId)
