@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 import { GameStateManager, RateLimiter } from "@/lib/upstash-client"
+import { RealtimeManager } from "@/lib/realtime-manager"
 
 interface BoardSelection {
   roomId: string
@@ -171,6 +172,18 @@ export async function POST(request: Request) {
 
       const updatedSelections = await GameStateManager.getBoardSelections(roomId)
 
+      // 🚀 BROADCAST REAL-TIME UPDATE TO ALL PLAYERS IN THE ROOM
+      RealtimeManager.broadcast(roomId, {
+        type: "board_selection_update",
+        data: {
+          action: "select",
+          selection: newSelection,
+          allSelections: updatedSelections,
+          selectedNumbers: updatedSelections.map((s) => s.boardNumber),
+          timestamp: new Date().toISOString(),
+        },
+      })
+
       return NextResponse.json(
         {
           success: true,
@@ -195,6 +208,18 @@ export async function POST(request: Request) {
       console.log("Board deselected for player:", playerId)
 
       const updatedSelections = await GameStateManager.getBoardSelections(roomId)
+
+      // 🚀 BROADCAST REAL-TIME UPDATE TO ALL PLAYERS IN THE ROOM
+      RealtimeManager.broadcast(roomId, {
+        type: "board_selection_update",
+        data: {
+          action: "deselect",
+          playerId,
+          allSelections: updatedSelections,
+          selectedNumbers: updatedSelections.map((s) => s.boardNumber),
+          timestamp: new Date().toISOString(),
+        },
+      })
 
       return NextResponse.json(
         {

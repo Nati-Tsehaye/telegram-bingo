@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, useCallback } from "react"
 
 interface RealtimeEvent {
   type: string
-  data?: unknown
+  data?: any
   timestamp?: string
 }
 
@@ -21,11 +21,13 @@ export function useRealtime(roomId: string, playerId: string) {
     }
 
     const url = `/api/events/${roomId}?playerId=${playerId}`
+    console.log(`📡 Connecting to SSE: ${url}`)
+
     const eventSource = new EventSource(url)
     eventSourceRef.current = eventSource
 
     eventSource.onopen = () => {
-      console.log("SSE connected to room:", roomId)
+      console.log(`📡 SSE connected to room: ${roomId}`)
       setIsConnected(true)
       setReconnectAttempts(0)
     }
@@ -33,39 +35,64 @@ export function useRealtime(roomId: string, playerId: string) {
     eventSource.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data)
+        console.log(`📡 SSE message received:`, data)
         setLastEvent(data)
 
-        // Handle different event types
+        // Handle different event types and dispatch custom events
         switch (data.type) {
-          case "game_update":
-            // Game state changed
-            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data }))
-            break
-          case "board_selection":
-            // Board selection changed
+          case "board_selection_update":
+            console.log(`🎯 Board selection update:`, data.data)
             window.dispatchEvent(new CustomEvent("boardSelectionUpdate", { detail: data.data }))
             break
-          case "board_deselection":
-            // Board deselection
-            window.dispatchEvent(new CustomEvent("boardDeselectionUpdate", { detail: data.data }))
+
+          case "number_called":
+            console.log(`🎲 Number called:`, data.data.newNumber)
+            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data.gameState }))
             break
+
+          case "game_started":
+            console.log(`🎮 Game started`)
+            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data }))
+            break
+
+          case "game_finished":
+            console.log(`🏁 Game finished`)
+            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data }))
+            break
+
+          case "bingo_claimed":
+            console.log(`🎉 BINGO claimed by:`, data.data.winner.playerName)
+            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data.gameState }))
+            break
+
+          case "game_reset":
+            console.log(`🔄 Game reset`)
+            window.dispatchEvent(new CustomEvent("gameStateUpdate", { detail: data.data }))
+            break
+
+          case "connected":
+            console.log(`🔌 Connected to room ${data.roomId}`)
+            break
+
           case "heartbeat":
-            // Keep connection alive
+            // Keep connection alive - no action needed
             break
+
           default:
-            console.log("Unknown event type:", data.type)
+            console.log(`📡 Unknown event type: ${data.type}`, data)
         }
       } catch (error) {
-        console.error("Error parsing SSE message:", error)
+        console.error("📡 Error parsing SSE message:", error, event.data)
       }
     }
 
     eventSource.onerror = (error) => {
-      console.error("SSE error:", error)
+      console.error(`📡 SSE error for room ${roomId}:`, error)
       setIsConnected(false)
 
       // Implement exponential backoff for reconnection
       const backoffDelay = Math.min(1000 * Math.pow(2, reconnectAttempts), 30000)
+      console.log(`📡 Reconnecting in ${backoffDelay}ms (attempt ${reconnectAttempts + 1})`)
 
       reconnectTimeoutRef.current = setTimeout(() => {
         setReconnectAttempts((prev) => prev + 1)
@@ -75,6 +102,8 @@ export function useRealtime(roomId: string, playerId: string) {
   }, [roomId, playerId, reconnectAttempts])
 
   const disconnect = useCallback(() => {
+    console.log(`📡 Disconnecting from room ${roomId}`)
+
     if (eventSourceRef.current) {
       eventSourceRef.current.close()
       eventSourceRef.current = null
@@ -86,10 +115,11 @@ export function useRealtime(roomId: string, playerId: string) {
     }
 
     setIsConnected(false)
-  }, [])
+  }, [roomId])
 
   useEffect(() => {
     if (roomId && playerId) {
+      console.log(`📡 Setting up real-time connection for room ${roomId}, player ${playerId}`)
       connect()
     }
 
