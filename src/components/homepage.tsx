@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState } from "react"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { RefreshCw, Users, Coins } from "lucide-react"
@@ -58,18 +58,18 @@ export default function Homepage() {
   const [currentScreen, setCurrentScreen] = useState<"lobby" | "game">("lobby")
   const [selectedRoom, setSelectedRoom] = useState<GameRoom | null>(null)
 
-//   // Initialize Telegram Web App
-//   useEffect(() => {
-//     if (typeof window !== "undefined" && window.Telegram?.WebApp) {
-//       const tg = window.Telegram.WebApp
-//       tg.ready()
-//       tg.expand()
+  //   // Initialize Telegram Web App
+  //   useEffect(() => {
+  //     if (typeof window !== "undefined" && window.Telegram?.WebApp) {
+  //       const tg = window.Telegram.WebApp
+  //       tg.ready()
+  //       tg.expand()
 
-//       // Set theme colors to match the blue design
-//       document.documentElement.style.setProperty("--tg-theme-bg-color", "#1e40af")
-//       document.documentElement.style.setProperty("--tg-theme-text-color", "#ffffff")
-//     }
-//   }, [])
+  //       // Set theme colors to match the blue design
+  //       document.documentElement.style.setProperty("--tg-theme-bg-color", "#1e40af")
+  //       document.documentElement.style.setProperty("--tg-theme-text-color", "#ffffff")
+  //     }
+  //   }, [])
 
   const handleRefresh = () => {
     // Simulate refreshing room data
