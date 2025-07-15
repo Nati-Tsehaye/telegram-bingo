@@ -24,7 +24,9 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
   const {
     rooms,
     playerId,
-    isPlayerRegisteredOnServer, // Get new state
+    isPlayerRegisteredOnServer,
+    currentCalledNumber,
+    allCalledNumbers,
     joinRoom,
     startGame,
     selectBoard: sendSelectBoard,
@@ -138,7 +140,15 @@ export default function GameScreen({ room: initialRoom, onBack }: GameScreenProp
 
   // Show the bingo game if started
   if (showBingoGame && selectedBoard) {
-    return <BingoGame room={currentRoom} selectedBoard={selectedBoard} onBack={onBack} />
+    return (
+      <BingoGame
+        room={currentRoom}
+        selectedBoard={selectedBoard}
+        onBack={onBack}
+        currentCalledNumber={currentCalledNumber}
+        allCalledNumbers={allCalledNumbers}
+      />
+    )
   }
 
   return (

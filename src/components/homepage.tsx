@@ -28,6 +28,8 @@ export default function Homepage() {
       status: "waiting",
       hasBonus: true,
       selectedBoards: [], // Add selectedBoards for fallback
+      startTime: undefined,
+      calledNumbers: []
     },
     {
       id: 2,
@@ -37,6 +39,8 @@ export default function Homepage() {
       status: "waiting",
       hasBonus: true,
       selectedBoards: [], // Add selectedBoards for fallback
+      startTime: undefined,
+      calledNumbers: []
     },
     {
       id: 3,
@@ -47,6 +51,8 @@ export default function Homepage() {
       activeGames: 0,
       hasBonus: true,
       selectedBoards: [], // Add selectedBoards for fallback
+      startTime: undefined,
+      calledNumbers: []
     },
     {
       id: 4,
@@ -57,6 +63,8 @@ export default function Homepage() {
       activeGames: 0,
       hasBonus: true,
       selectedBoards: [], // Add selectedBoards for fallback
+      startTime: undefined,
+      calledNumbers: []
     },
   ])
 
@@ -72,9 +80,11 @@ export default function Homepage() {
 
   const handlePlay = (room: GameRoomClient) => {
     // Use GameRoomClient
-    // Navigate to game screen without joining the room yet
-    setSelectedRoom(room)
-    setCurrentScreen("game")
+    // Only navigate if the room is not active
+    if (room.status !== "active") {
+      setSelectedRoom(room)
+      setCurrentScreen("game")
+    }
   }
 
   const tabs = ["Stake", "Active", "Players", "Derash", "Play"]
@@ -157,11 +167,11 @@ export default function Homepage() {
             )}
 
             {/* Active Game Indicator */}
-            {room.status === "active" && (
+            {(room.status === "active" || room.status === "starting") && (
               <div className="absolute top-2 left-16">
                 <Badge className="bg-red-500 hover:bg-red-600 text-white text-xs">
                   <div className="w-2 h-2 bg-green-400 rounded-full mr-1 animate-pulse"></div>
-                  Active game {room.activeGames}
+                  {room.status === "starting" ? `Active game ${room.activeGames}` : "playing"}
                 </Badge>
               </div>
             )}
@@ -198,7 +208,8 @@ export default function Homepage() {
               <div>
                 <Button
                   onClick={() => handlePlay(room)}
-                  className="bg-gray-600 hover:bg-gray-700 text-purple-300 font-bold px-6 py-2 rounded-lg border-0"
+                  disabled={room.status === "active"} // Disable if room status is "active"
+                  className="bg-gray-600 hover:bg-gray-700 text-purple-300 font-bold px-6 py-2 rounded-lg border-0 disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   Play
                 </Button>
