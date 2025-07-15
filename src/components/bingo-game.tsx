@@ -178,7 +178,7 @@ export default function BingoGame({
   const handleClaimBingo = () => {
     if (bingoDetected && !hasWonLocally && room.status !== "game_over") {
       setHasWonLocally(true) // Set local state for the winner
-      claimBingo(room.id, selectedBoard.numbers, markedCells) // Pass board numbers and marked cells
+      claimBingo(room.id) // Send claim to server
     }
   }
 
@@ -356,12 +356,12 @@ export default function BingoGame({
                       onClick={() => toggleCellMark(rowIndex, colIndex)}
                       disabled={hasWonLocally || bingoDetected || room.status === "game_over" || isFree} // Disable marking if won, BINGO detected, game over, or free space
                       className={`
-                    w-8 h-8 flex items-center justify-center text-xs font-bold rounded transition-all
-                    ${isMarked && !isFree ? "bg-green-500 text-white" : ""}
-                    ${isFree ? "bg-yellow-500 text-white" : ""}
-                    ${!isMarked && !isFree ? "bg-amber-700 text-white" : ""}
-                    hover:opacity-80 transition-opacity
-                  `}
+                      w-8 h-8 flex items-center justify-center text-xs font-bold rounded transition-all
+                      ${isMarked && !isFree ? "bg-green-500 text-white" : ""}
+                      ${isFree ? "bg-yellow-500 text-white" : ""}
+                      ${!isMarked && !isFree ? "bg-amber-700 text-white" : ""}
+                      hover:opacity-80 transition-opacity
+                    `}
                     >
                       {isFree ? "★" : number}
                     </button>

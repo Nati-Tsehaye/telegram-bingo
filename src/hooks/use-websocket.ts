@@ -15,13 +15,7 @@ export interface GameRoomClient {
   startTime?: number // New: Timestamp when the game started (for countdown sync)
   calledNumbers: number[] // New: Track all called numbers
   currentNumber?: number // New: Current number being called
-  winner?: {
-    playerId: string
-    playerName: string
-    prize: number
-    winnerBoard?: number[][] // New: Winner's board numbers
-    winnerMarkedCells?: boolean[][] // New: Winner's marked cells
-  } | null // Changed to allow null
+  winner?: { playerId: string; playerName: string; prize: number } | null // Changed to allow null
 }
 
 interface WebSocketMessage {
@@ -47,8 +41,6 @@ interface WebSocketMessage {
   winnerPlayerId?: string // New: ID of the player who won
   winnerName?: string // New: Name of the player who won
   winningPrize?: number // New: Prize amount for the winner
-  winnerBoard?: number[][] // New: For bingo_won message
-  winnerMarkedCells?: boolean[][] // New: For bingo_won message
 }
 
 // Global WebSocket instance to persist across component mounts/unmounts
@@ -61,13 +53,7 @@ const globalConnectionState = {
   isPlayerRegisteredOnServer: false,
   currentCalledNumber: null as number | null,
   allCalledNumbers: [] as number[],
-  winnerInfo: null as {
-    playerId: string
-    playerName: string
-    prize: number
-    winnerBoard?: number[][] // New: Winner's board numbers
-    winnerMarkedCells?: boolean[][] // New: Winner's marked cells
-  } | null, // New: Store winner info
+  winnerInfo: null as { playerId: string; playerName: string; prize: number } | null, // New: Store winner info
 }
 
 // Global listeners for state updates
@@ -145,20 +131,12 @@ function connectGlobalWebSocket(url: string) {
             }
             break
           case "bingo_won": // New case for BINGO win broadcast
-            if (
-              message.winnerPlayerId &&
-              message.winnerName &&
-              message.winningPrize !== undefined &&
-              message.winnerBoard &&
-              message.winnerMarkedCells
-            ) {
+            if (message.winnerPlayerId && message.winnerName && message.winningPrize !== undefined) {
               console.log(`🏆 BINGO won by ${message.winnerName} with prize ${message.winningPrize}!`)
               globalConnectionState.winnerInfo = {
                 playerId: message.winnerPlayerId,
                 playerName: message.winnerName,
                 prize: message.winningPrize,
-                winnerBoard: message.winnerBoard, // Store winner's board
-                winnerMarkedCells: message.winnerMarkedCells, // Store winner's marked cells
               }
               // Also update the room status to game_over if it's not already
               globalConnectionState.rooms = globalConnectionState.rooms.map((room) =>
@@ -281,13 +259,11 @@ export function useWebSocket(url: string) {
     })
   }, [])
 
-  const claimBingo = useCallback((roomId: number, boardNumbers: number[][], markedCells: boolean[][]) => {
+  const claimBingo = useCallback((roomId: number) => {
     console.log(`🎉 Claiming BINGO in room ${roomId}`)
     sendGlobalMessage({
       type: "bingo_won",
       roomId,
-      winnerBoard: boardNumbers, // Send the actual board numbers
-      winnerMarkedCells: markedCells, // Send the marked cells
     })
   }, [])
 

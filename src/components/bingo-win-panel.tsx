@@ -60,11 +60,11 @@ export default function BingoWinPanel({
                     <div
                       key={`${rowIndex}-${colIndex}`}
                       className={`
-                        w-10 h-10 flex items-center justify-center text-sm font-bold rounded
-                        ${isMarked && !isFree ? "bg-green-500 text-white" : ""}
-                        ${isFree ? "bg-yellow-500 text-white" : ""}
-                        ${!isMarked && !isFree ? "bg-amber-700 text-white" : ""}
-                      `}
+                      w-10 h-10 flex items-center justify-center text-sm font-bold rounded
+                      ${isMarked && !isFree ? "bg-green-500 text-white" : ""}
+                      ${isFree ? "bg-yellow-500 text-white" : ""}
+                      ${!isMarked && !isFree ? "bg-amber-700 text-white" : ""}
+                    `}
                     >
                       {isFree ? "★" : number}
                     </div>
